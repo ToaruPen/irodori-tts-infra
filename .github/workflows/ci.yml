@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint & typecheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-python: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Dead code detection
+        run: uv run vulture src/ --min-confidence 80
+
+      - name: Dependency hygiene
+        run: uv run deptry .
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-python: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Tests with coverage
+        run: |
+          uv run pytest tests/ \
+            --cov=irodori_tts_infra \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage.xml
+
+  quality-gates:
+    name: Quality gates
+    runs-on: ubuntu-24.04
+    needs: [lint, test]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "lint: ${{ needs.lint.result }}"
+            echo "test: ${{ needs.test.result }}"
+            exit 1
+          fi

@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: ja
+tone_instructions: >-
+  Be direct and concise. Prioritize fail-fast, DRY, YAGNI, and TDD principles.
+  Flag test gaps aggressively — missing edge cases, weak assertions, weak error
+  path coverage, and missing safety assertions are high-priority findings.
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_in_walkthrough: false
+  review_status: true
+  commit_status: true
+  fail_commit_status: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  poem: false
+  in_progress_fortune: false
+  enable_prompt_for_ai_agents: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+
+  path_instructions:
+    - path: "src/**/*.py"
+      instructions: >-
+        Review for TDD compliance, type safety, and import boundary violations.
+        Check that:
+        - contracts/ imports only pydantic/stdlib
+        - client/ does not import server, engine, or cache
+        - engine/ does not import server or client
+        - config/ does not import runtime packages
+        - server/routers/ handlers are thin (validate, delegate, return)
+        - No print() in library code (use structlog)
+        - No broad except clauses
+        - No commented-out code
+        - No speculative TODOs without issue reference
+
+    - path: "tests/**/*.py"
+      instructions: >-
+        TDD is the primary quality gate. Review tests with extra scrutiny:
+        - Behavior changes must have corresponding tests
+        - Assertions must verify meaningful state, not only status codes
+        - Cover happy-path, invalid-input, and error-path cases
+        - Flag tests that only prove a path works but do not prove failure is safe
+        - Tests must be deterministic — no time/random/IO-dependent flakiness
+
+    - path: "src/**/engine/**/*.py"
+      instructions: >-
+        GPU synthesis boundary. No FastAPI or HTTP imports allowed.
+        Check for unbounded GPU memory usage, missing cleanup, and
+        backends that don't implement the Synthesizer protocol correctly.
+
+    - path: "src/**/server/**/*.py"
+      instructions: >-
+        FastAPI layer. Routers must stay thin. Check for:
+        - Business logic leaking into route handlers
+        - Missing error handling middleware
+        - Incorrect streaming response framing
+        - CORS/auth configuration gaps
+
+    - path: "src/**/config/**/*.py"
+      instructions: >-
+        Configuration boundary. Must not import any runtime packages.
+        Check for hardcoded values, missing validation, and
+        environment variables without documentation.
+
+  tools:
+    shellcheck:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto

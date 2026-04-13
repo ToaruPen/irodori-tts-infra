@@ -1,0 +1,96 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv (keep uv.lock for reproducible installs)
+uv.lock
+
+# Python tooling caches
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Logs
+*.log
+logs/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# ML/TTS model artifacts
+models/
+checkpoints/
+weights/
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# Generated audio
+audio/
+outputs/
+recordings/
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# Large data
+data/raw/
+data/interim/
+data/processed/
+datasets/
+runs/
+tensorboard/
+*.npy
+*.npz
+*.parquet
+*.h5
+*.hdf5
+
+# Local caches
+.cache/
+.huggingface/
+.torch/
+
+# Keep intentional test fixtures
+!tests/fixtures/**
+!tests/fixtures/audio/**
