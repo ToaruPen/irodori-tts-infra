@@ -31,12 +31,14 @@ jobs:
 
       - name: Format + lint
         run: |
+          set +e
           uv run ruff format --check . &
           fmt_pid=$!
           uv run ruff check .
           ruff_rc=$?
           wait "$fmt_pid"
           fmt_rc=$?
+          set -e
           if [ "$ruff_rc" -ne 0 ] || [ "$fmt_rc" -ne 0 ]; then
             echo "ruff check=$ruff_rc, format=$fmt_rc"
             exit 1
@@ -47,12 +49,14 @@ jobs:
 
       - name: Dead code + dependency hygiene
         run: |
+          set +e
           uv run vulture src/ --min-confidence 80 &
           vul_pid=$!
           uv run deptry .
           dep_rc=$?
           wait "$vul_pid"
           vul_rc=$?
+          set -e
           if [ "$vul_rc" -ne 0 ] || [ "$dep_rc" -ne 0 ]; then
             echo "vulture=$vul_rc, deptry=$dep_rc"
             exit 1
