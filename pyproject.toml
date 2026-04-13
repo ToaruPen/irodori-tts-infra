@@ -121,6 +121,7 @@ task-tags = ["TODO", "FIXME", "HACK", "XXX"]
 ]
 "src/**/__init__.py" = [
   "F401",  # explicit re-export surface
+  "RUF067",  # __version__ via importlib.metadata
 ]
 
 [tool.ruff.lint.flake8-annotations]
@@ -213,6 +214,7 @@ ignore_missing_imports = true
 
 # --- deptry ---
 
+# TODO: Remove ignores as implementation progresses
 [tool.deptry.per_rule_ignores]
 DEP002 = [
   "pydantic",
