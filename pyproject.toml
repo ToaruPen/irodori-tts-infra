@@ -211,9 +211,27 @@ enable_error_code = [
 module = ["uvicorn.*"]
 ignore_missing_imports = true
 
+# --- deptry ---
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+  "pydantic",
+  "pydantic-settings",
+  "structlog",
+  "fastapi",
+  "uvicorn",
+  "httpx",
+  "rich",
+  "typer",
+  "opentelemetry-api",
+  "opentelemetry-sdk",
+  "prometheus-client",
+  "irodori-tts-infra",
+]
+
 # --- pytest ---
 
-[tool.pytest]
+[tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
