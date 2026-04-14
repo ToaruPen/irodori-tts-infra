@@ -110,6 +110,18 @@ class StreamChunkHeader(_ContractModel):
     )
     error_code: Literal["backend_unavailable", "backpressure"] | None = None
 
+    @model_validator(mode="after")
+    def _validate_terminal_error_frame(self) -> Self:
+        if self.error_code is None:
+            return self
+        if not self.final:
+            msg = "error frames must be final"
+            raise ValueError(msg)
+        if self.byte_length != 0:
+            msg = "error frames must have byte_length 0"
+            raise ValueError(msg)
+        return self
+
     @field_serializer("elapsed_seconds", when_used="json")
     def _serialize_elapsed(self, value: float) -> float:  # noqa: PLR6301
         return round(value, 3)

@@ -184,6 +184,61 @@ def test_stream_header_serializes_terminal_error_code() -> None:
     assert b"error_code" not in normal_header.to_bytes()
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        (False, 0, "final"),
+        (True, 1, "byte_length"),
+    ],
+)
+def test_stream_header_rejects_malformed_terminal_error_frame(
+    case: tuple[bool, int, str],
+) -> None:
+    final, byte_length, expected_error = case
+
+    with pytest.raises(ValidationError, match=expected_error):
+        StreamChunkHeader(
+            segment_index=1,
+            byte_length=byte_length,
+            final=final,
+            error_code="backend_unavailable",
+        )
+
+
+def test_stream_header_accepts_terminal_error_frame_shape() -> None:
+    header = StreamChunkHeader(
+        segment_index=1,
+        byte_length=0,
+        final=True,
+        error_code="backpressure",
+    )
+
+    assert header.error_code == "backpressure"
+    assert header.final is True
+    assert header.byte_length == 0
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        (False, 0),
+        (False, 16),
+        (True, 0),
+        (True, 16),
+    ],
+)
+def test_stream_header_without_error_code_allows_regular_chunk_shapes(
+    case: tuple[bool, int],
+) -> None:
+    final, byte_length = case
+
+    header = StreamChunkHeader(segment_index=1, byte_length=byte_length, final=final)
+
+    assert header.error_code is None
+    assert header.final is final
+    assert header.byte_length == byte_length
+
+
 def test_health_response_rejects_whitespace_only_detail() -> None:
     with pytest.raises(ValidationError, match="detail"):
         HealthResponse(status="degraded", model_loaded=False, detail="   ")
