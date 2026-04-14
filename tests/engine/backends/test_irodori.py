@@ -414,9 +414,10 @@ def test_runtime_key_cls_falls_back_to_module_attr() -> None:
 
 
 def test_runtime_factory_falls_back_to_module_attr() -> None:
-    resolved = _runtime_factory(None, fake_inference_runtime_module())
+    module = fake_inference_runtime_module()
+    resolved = _runtime_factory(None, module)
 
-    assert callable(resolved)
+    assert resolved is module.InferenceRuntime.from_key
 
 
 def test_save_wav_fn_falls_back_to_module_attr() -> None:

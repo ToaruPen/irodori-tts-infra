@@ -88,7 +88,15 @@ jobs:
             --cov-report=xml:reports/coverage.xml
 
       - name: Combine parallel coverage data
-        run: uv run coverage combine || true
+        run: |
+          set -euo pipefail
+          if ! output=$(uv run coverage combine 2>&1); then
+            echo "$output"
+            if echo "$output" | grep -q "No data to combine"; then
+              exit 0
+            fi
+            exit 1
+          fi
 
       - name: Coverage gate — pure modules must be 100% (line + branch)
         run: |

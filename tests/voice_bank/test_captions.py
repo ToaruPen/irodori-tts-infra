@@ -70,8 +70,8 @@ def test_load_characters_markdown_emits_multiple_blocks() -> None:
     result = load_characters_markdown(content)
 
     assert set(result.keys()) == {"名前A", "名前B"}
-    assert result["名前A"].caption
-    assert result["名前B"].caption
+    assert result["名前A"].caption == "女性が、自然な口調で話している。"
+    assert result["名前B"].caption == "女性が、自然な口調で話している。"
 
 
 @pytest.mark.parametrize(

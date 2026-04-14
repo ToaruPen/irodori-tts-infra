@@ -14,7 +14,9 @@ def test_voice_profile_rejects_blank_name() -> None:
 
 
 def test_voice_profile_rejects_scalar_aliases() -> None:
-    with pytest.raises(ValidationError, match="aliases"):
+    with pytest.raises(ValidationError) as exc_info:
         VoiceProfileResponse.model_validate(
             {"name": "x", "caption": "y", "aliases": "narrator"},
         )
+
+    assert any(err.get("loc") == ("aliases",) for err in exc_info.value.errors())
