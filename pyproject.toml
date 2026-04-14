@@ -44,12 +44,14 @@ metrics = [
   "opentelemetry-sdk>=1.28,<2",
   "prometheus-client>=0.21,<1",
 ]
+irodori = []
 all = [
-  "irodori-tts-infra[server,client,metrics]",
+  "irodori-tts-infra[server,client,metrics,irodori]",
 ]
 
 [project.scripts]
 irodori-tts = "irodori_tts_infra.client.cli:app"
+irodori-tts-deploy = "irodori_tts_infra.deploy.cli:app"
 
 [dependency-groups]
 dev = [
@@ -234,6 +236,11 @@ DEP002 = [
 ignore_names = [
   "aliases",
   "content_type",
+  "deploy_bootstrap",
+  "deploy_start",
+  "deploy_status",
+  "deploy_stop",
+  "deploy_sync",
   "exc",
   "exc_type",
   "get_health",
