@@ -49,7 +49,7 @@ class BatchSynthesisRequest(_ContractModel):
 
 class SynthesisResult(_ContractModel):
     segment_index: int = Field(ge=0)
-    wav_bytes: bytes = Field(min_length=1)
+    wav_bytes: bytes
     elapsed_seconds: float = Field(ge=0.0)
     content_type: Literal["audio/wav"] = "audio/wav"
 
@@ -108,13 +108,26 @@ class StreamChunkHeader(_ContractModel):
         serialization_alias="elapsed",
         validation_alias=AliasChoices("elapsed_seconds", "elapsed"),
     )
+    error_code: Literal["backend_unavailable", "backpressure"] | None = None
+
+    @model_validator(mode="after")
+    def _validate_terminal_error_frame(self) -> Self:
+        if self.error_code is None:
+            return self
+        if not self.final:
+            msg = "error frames must be final"
+            raise ValueError(msg)
+        if self.byte_length != 0:
+            msg = "error frames must have byte_length 0"
+            raise ValueError(msg)
+        return self
 
     @field_serializer("elapsed_seconds", when_used="json")
     def _serialize_elapsed(self, value: float) -> float:  # noqa: PLR6301
         return round(value, 3)
 
     def to_bytes(self) -> bytes:
-        return _encode_ndjson_line(self.model_dump(mode="json", by_alias=True))
+        return _encode_ndjson_line(self.model_dump(mode="json", by_alias=True, exclude_none=True))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
