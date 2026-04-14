@@ -108,13 +108,14 @@ class StreamChunkHeader(_ContractModel):
         serialization_alias="elapsed",
         validation_alias=AliasChoices("elapsed_seconds", "elapsed"),
     )
+    error_code: Literal["backend_unavailable", "backpressure"] | None = None
 
     @field_serializer("elapsed_seconds", when_used="json")
     def _serialize_elapsed(self, value: float) -> float:  # noqa: PLR6301
         return round(value, 3)
 
     def to_bytes(self) -> bytes:
-        return _encode_ndjson_line(self.model_dump(mode="json", by_alias=True))
+        return _encode_ndjson_line(self.model_dump(mode="json", by_alias=True, exclude_none=True))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:

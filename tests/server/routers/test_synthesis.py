@@ -15,6 +15,7 @@ from irodori_tts_infra.contracts import (
     SynthesisResult,
 )
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer, FakeSynthResponse
+from irodori_tts_infra.engine.errors import BackendUnavailableError, BackpressureError
 from irodori_tts_infra.engine.models import PipelineConfig, SynthesizedAudio
 from irodori_tts_infra.server.app import create_app
 
@@ -31,6 +32,7 @@ pytestmark = pytest.mark.unit
 STREAM_MAX_CHUNK_SIZE = 64
 SPLIT_STREAM_CHUNK_SIZE = 4
 TEST_EVENT_TIMEOUT = 5.0
+MID_STREAM_ERROR_CHUNK_COUNT = 2
 
 
 class BlockingSynthesizer:
@@ -257,6 +259,64 @@ def test_synthesize_batch_returns_200_for_empty_wav_bytes(
     assert result.results[0].elapsed_seconds >= 0.0
 
 
+def test_synthesize_batch_maps_backend_unavailable_to_503(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        exception=BackendUnavailableError("backend offline"),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_batch",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["code"] == "backend_unavailable"
+
+
+def test_synthesize_batch_maps_backpressure_to_429(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        exception=BackpressureError("capacity unavailable"),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_batch",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert response.json()["code"] == "backpressure"
+
+
 def test_synthesize_batch_rejects_unordered_segment_indices(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
@@ -384,6 +444,106 @@ def test_synthesize_stream_emits_terminal_header_for_empty_wav_bytes(
     assert header.byte_length == 0
     assert header.final is True
     assert header.elapsed_seconds >= 0.0
+    assert payload == b""
+
+
+def test_synthesize_stream_emits_terminal_on_backend_unavailable(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        audio=SynthesizedAudio(wav_bytes=b"RIFFok", sample_rate=24_000),
+                    ),
+                    FakeSynthResponse(
+                        exception=BackendUnavailableError("backend offline"),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {"segment_index": 1, "text": "二つ目", "caption": "別の声。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    _, chunks = _parse_stream(response.content)
+    assert len(chunks) == MID_STREAM_ERROR_CHUNK_COUNT
+    assert chunks[0][0].segment_index == 0
+    assert chunks[0][0].final is True
+    assert chunks[0][0].error_code is None
+    assert chunks[0][1] == b"RIFFok"
+    error_chunks = [
+        (header, payload)
+        for header, payload in chunks
+        if header.byte_length == 0 and header.error_code is not None
+    ]
+    assert len(error_chunks) == 1
+    header, payload = error_chunks[0]
+    assert header.segment_index == 1
+    assert header.byte_length == 0
+    assert header.final is True
+    assert header.error_code == "backend_unavailable"
+    assert payload == b""
+
+
+def test_synthesize_stream_emits_terminal_on_backpressure(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        audio=SynthesizedAudio(wav_bytes=b"RIFFok", sample_rate=24_000),
+                    ),
+                    FakeSynthResponse(
+                        exception=BackpressureError("capacity unavailable"),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {"segment_index": 1, "text": "二つ目", "caption": "別の声。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    _, chunks = _parse_stream(response.content)
+    assert len(chunks) == MID_STREAM_ERROR_CHUNK_COUNT
+    assert chunks[0][0].segment_index == 0
+    assert chunks[0][0].final is True
+    assert chunks[0][0].error_code is None
+    assert chunks[0][1] == b"RIFFok"
+    error_chunks = [
+        (header, payload)
+        for header, payload in chunks
+        if header.byte_length == 0 and header.error_code is not None
+    ]
+    assert len(error_chunks) == 1
+    header, payload = error_chunks[0]
+    assert header.segment_index == 1
+    assert header.byte_length == 0
+    assert header.final is True
+    assert header.error_code == "backpressure"
     assert payload == b""
 
 

@@ -168,6 +168,22 @@ def test_stream_header_defaults_include_version() -> None:
     assert header.final is False
 
 
+def test_stream_header_serializes_terminal_error_code() -> None:
+    header = StreamChunkHeader(
+        segment_index=1,
+        byte_length=0,
+        final=True,
+        error_code="backend_unavailable",
+    )
+
+    wire = header.to_bytes()
+    assert b"backend_unavailable" in wire
+    assert StreamChunkHeader.from_bytes(wire) == header
+
+    normal_header = StreamChunkHeader(segment_index=1, byte_length=4)
+    assert b"error_code" not in normal_header.to_bytes()
+
+
 def test_health_response_rejects_whitespace_only_detail() -> None:
     with pytest.raises(ValidationError, match="detail"):
         HealthResponse(status="degraded", model_loaded=False, detail="   ")
