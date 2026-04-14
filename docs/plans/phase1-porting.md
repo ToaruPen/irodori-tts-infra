@@ -6,8 +6,10 @@
 
 **Inputs inspected:**
 
-- Prototype: `/Users/sankenbisha/dev/test/tts/parser.py`, `characters.py`, `tts_engine.py`, `player.py`, `read_aloud.py`, `remote_server.py`, `remote_synth.py`
-- Prototype workflow docs: `/Users/sankenbisha/dev/test/tts/AGENTS.md`, `/Users/sankenbisha/dev/test/tts/CLAUDE.md`, `/Users/sankenbisha/dev/test/.agent/rules/writing_guidelines.md`, `/Users/sankenbisha/dev/test/.agent/skills/read_aloud/SKILL.md`
+- Prototype: `<prototype_root>/tts/parser.py`, `characters.py`, `tts_engine.py`, `player.py`, `read_aloud.py`, `remote_server.py`, `remote_synth.py`
+- Prototype workflow docs: `<prototype_root>/tts/AGENTS.md`, `<prototype_root>/tts/CLAUDE.md`, `<prototype_root>/.agent/rules/writing_guidelines.md`, `<prototype_root>/.agent/skills/read_aloud/SKILL.md`
+
+`<prototype_root>` is the experimental repo containing the original prototype (outside this repo). Subsequent references use the same placeholder.
 - Architecture docs: `docs/irodori-rvc-architecture.md`, `docs/irodori-tts-optimization.md`
 - Current skeleton: `src/irodori_tts_infra/` and matching empty tests under `tests/`
 
@@ -40,8 +42,8 @@ Port in this order so each layer can be tested without importing heavier layers.
 
 | Item | Plan |
 |---|---|
-| Prototype source | Hardcoded host/port in `/Users/sankenbisha/dev/test/tts/tts_engine.py:14-23`; CLI overrides in `read_aloud.py:50-57` and `read_aloud.py:86-93`; Windows temp/model constants in `remote_server.py:18-20`; runtime guidance in `CLAUDE.md:32-36`. |
-| Extract | `ClientSettings`, `ServerSettings`, `IrodoriRuntimeSettings`, `PathSettings`, `load_settings()` or direct `BaseSettings` models. Defaults should include port `8923`, checkpoint `Aratako/Irodori-TTS-500M-v2-VoiceDesign`, `num_steps=30`, `cfg_scale_text=3.0`, `cfg_scale_caption=3.5`, `model_device`, `model_precision=bf16`, `codec_device`, `codec_precision=fp32`, temp WAV directory, warmup step count/text, `decode_mode`, KV-cache settings, and compile settings. Runtime defaults should cross-check `/Users/sankenbisha/dev/test/tts/remote_server.py`, `/Users/sankenbisha/dev/test/tts/remote_synth.py`, and `docs/irodori-tts-optimization.md`. |
+| Prototype source | Hardcoded host/port in `<prototype_root>/tts/tts_engine.py:14-23`; CLI overrides in `read_aloud.py:50-57` and `read_aloud.py:86-93`; Windows temp/model constants in `remote_server.py:18-20`; runtime guidance in `CLAUDE.md:32-36`. |
+| Extract | `ClientSettings`, `ServerSettings`, `IrodoriRuntimeSettings`, `PathSettings`, `load_settings()` or direct `BaseSettings` models. Defaults should include port `8923`, checkpoint `Aratako/Irodori-TTS-500M-v2-VoiceDesign`, `num_steps=30`, `cfg_scale_text=3.0`, `cfg_scale_caption=3.5`, `model_device`, `model_precision=bf16`, `codec_device`, `codec_precision=fp32`, temp WAV directory, warmup step count/text, `decode_mode`, KV-cache settings, and compile settings. Runtime defaults should cross-check `<prototype_root>/tts/remote_server.py`, `<prototype_root>/tts/remote_synth.py`, and `docs/irodori-tts-optimization.md`. |
 | Split/merge | Move prototype constants out of `TTSEngine` and `remote_server.py`. Use `pydantic-settings` env loading as the default config layer, with CLI flags overriding loaded settings rather than defining defaults independently. PR 1 must resolve the console script mismatch by either changing `pyproject.toml` to `irodori_tts_infra.client.cli:app` or moving the CLI to top-level `cli.py`. |
 | Tests | Unit tests for defaults, env overrides, invalid port/path values, import safety, and installed-script smoke coverage for `irodori-tts --help`. No network, filesystem writes, or Irodori imports. |
 | Complexity | **M**. The code is small, but settings must stay explicit and avoid import side effects. |
@@ -52,15 +54,15 @@ Port in this order so each layer can be tested without importing heavier layers.
 |---|---|
 | Prototype source | Request/response dicts in `tts_engine.py:40-52`, `tts_engine.py:54-85`, `tts_engine.py:87-128`; server JSON handling in `remote_server.py:76-113`; stream header format in `remote_server.py:23-25`; health response in `remote_server.py:139-145`. |
 | Extract | `SynthesisRequest`, `SynthesisSegment`, `BatchSynthesisRequest`, `SynthesisResult`, `BatchSynthesisResult`, `StreamChunkHeader`, `HealthResponse`, `VoiceProfileResponse`, shared error payloads. HTTP byte streaming is the Phase 1 audio transport contract: `/synthesize_stream` emits ordered framed WAV byte chunks; JSON responses must not expose server temp paths or require SCP download. |
-| Split/merge | Replace ad hoc JSON dicts with pydantic models. Define stream framing upfront: each chunk carries segment order metadata plus byte length, followed by exact WAV bytes. `HealthResponse` replaces the prototype's plain `ok` text. |
-| Tests | Unit tests for model validation, JSON round-trip, default synthesis parameters, ordered batch results, and stream header serialization with byte-exact chunk reconstruction. |
+| Split/merge | Replace ad hoc JSON dicts with pydantic models. `HealthResponse` replaces the prototype's plain `ok` text. **Stream framing spec (locked for Phase 1):** JSON-line header terminated by a single `\n` byte, followed by exactly `byte_length` bytes of WAV payload. Header fields: `header_version: int = 1`, `segment_index: int` (monotonic per request, range `[0, 2^32)`), `byte_length: int` (range `[0, max_chunk_size]`), optional `final: bool`. All integers are encoded as JSON numbers (portable, no endianness concerns since there are no raw binary integer fields). `max_chunk_size` default: 4 MiB (servers MAY lower; clients MUST accept any value up to the advertised cap). Header version bumps require explicit contract migration. |
+| Tests | Unit tests for model validation, JSON round-trip, default synthesis parameters, ordered batch results, and stream header serialization. Byte-exact reconstruction test: synthesize a mock WAV, frame it into multiple chunks, parse the framed stream, assert reassembled bytes match source byte-for-byte. Interop test: server-side framer output fed into client-side parser via in-memory buffer. Boundary tests: `byte_length == 0`, `byte_length == max_chunk_size`, rejection of oversized chunks, rejection of mismatched `segment_index` ordering. |
 | Complexity | **S-M**. Straightforward schema work once the HTTP byte-streaming contract is fixed. |
 
 ### `text/`
 
 | Item | Plan |
 |---|---|
-| Prototype source | `Segment` and `parse_turn()` in `parser.py:14-54`; metadata stripping in `parser.py:57-65`; narration flushing in `parser.py:68-71`; speaker tag format docs in `/Users/sankenbisha/dev/test/.agent/rules/writing_guidelines.md:38-70` and `/Users/sankenbisha/dev/test/.agent/skills/read_aloud/SKILL.md:64-104`. |
+| Prototype source | `Segment` and `parse_turn()` in `parser.py:14-54`; metadata stripping in `parser.py:57-65`; narration flushing in `parser.py:68-71`; speaker tag format docs in `<prototype_root>/.agent/rules/writing_guidelines.md:38-70` and `<prototype_root>/.agent/skills/read_aloud/SKILL.md:64-104`. |
 | Extract | `Segment`, `SegmentKind`, `SpeakerTag`, `parse_turn_markdown()`, `strip_turn_metadata()`, `parse_speaker_tag()`, `is_skippable_markdown_line()`. |
 | Split/merge | Put markdown traversal in `text/markdown.py`; put `【Name:direction】「dialogue」` parsing in `text/speaker_tags.py`; keep models in `text/models.py`. `normalization.py` can hold Irodori-compatible punctuation normalization later, but Phase 1 should not duplicate Irodori preprocessing unless needed. |
 | Tests | Unit tests for tagged dialogue, optional direction, bare dialogue, headings, `---` separators, metadata after `「「🏷️情報」:`, inner Japanese quotes such as `「『相性表』を見ましたか？」`, empty files, multiline narration joining, and malformed tags becoming narration. |
@@ -70,7 +72,7 @@ Port in this order so each layer can be tested without importing heavier layers.
 
 | Item | Plan |
 |---|---|
-| Prototype source | Caption constants in `characters.py:6-8`; character block parser in `characters.py:51-91`; heuristic caption builder in `characters.py:94-147`; character file discovery and caption resolution in `read_aloud.py:14-48`; voice assignment docs in `/Users/sankenbisha/dev/test/.agent/skills/read_aloud/SKILL.md:106-113`. |
+| Prototype source | Caption constants in `characters.py:6-8`; character block parser in `characters.py:51-91`; heuristic caption builder in `characters.py:94-147`; character file discovery and caption resolution in `read_aloud.py:14-48`; voice assignment docs in `<prototype_root>/.agent/skills/read_aloud/SKILL.md:106-113`. |
 | Extract | `CharacterVoice`, `VoiceProfile`, `load_characters_markdown()`, `build_voicedesign_caption()`, `resolve_segment_caption()`, `find_characters_markdown()`. |
 | Split/merge | Put caption heuristics in `captions.py`; repository/path discovery in `repository.py`; shared dataclasses/pydantic models in `models.py`. Phase 1 preserves the current caption heuristics with tests and later explicit overrides can layer on top. Defer durable manifests, aliases, narrator storage schema, and RVC model references to Phase 2+. Avoid carrying the prototype's broad heading skip rule from `characters.py:73-75` without tests. |
 | Tests | Unit tests for `characters.md` parsing, headings with parenthetical readings, attr keys like `年齢`, `年齢/外見`, `性格`, gender/age/personality detection, narrator fallback, known speaker captions, unknown speaker captions, directed-dialogue caption injection, and missing character files. Integration tests can use small sanitized fixture `characters.md` files. |
@@ -130,7 +132,7 @@ Port in this order so each layer can be tested without importing heavier layers.
 
 | Item | Plan |
 |---|---|
-| Prototype source | HTTP client and streaming reader in `tts_engine.py:18-52` and `tts_engine.py:87-128`; playback in `player.py:7-14`; CLI flow in `read_aloud.py:50-123`; read-aloud UX in `/Users/sankenbisha/dev/test/.agent/skills/read_aloud/SKILL.md:23-63`. |
+| Prototype source | HTTP client and streaming reader in `tts_engine.py:18-52` and `tts_engine.py:87-128`; playback in `player.py:7-14`; CLI flow in `read_aloud.py:50-123`; read-aloud UX in `<prototype_root>/.agent/skills/read_aloud/SKILL.md:23-63`. |
 | Extract | `SyncIrodoriClient`, `AsyncIrodoriClient`, `ReadAloudOptions`, Typer CLI `app`, ordered stream playback/save logic, client errors. |
 | Split/merge | `tts_engine.py` currently mixes HTTP, SSH/SCP cleanup, temp files, and progress printing. Split sync/async HTTP clients from CLI read-aloud orchestration. Use `httpx`, not `urllib.request`; do not retain SCP/temp-path download in Phase 1 normal flow. |
 | Tests | Unit tests with `httpx.MockTransport` for health, single, batch, stream framing, byte-exact stream reconstruction, and timeout/error mapping. CLI tests with `typer.testing.CliRunner`. Playback tests mock `subprocess.run` and verify segment-order playback even if mocked stream chunks arrive out of order. |
@@ -211,7 +213,7 @@ Keep each PR independently reviewable and under roughly 500 net source lines whe
 - The Irodori backend can run behind a `gpu` marker or documented manual smoke command without affecting default CI.
 - FastAPI exposes health and synthesis endpoints using shared contracts, including `HealthResponse` instead of the prototype plain `ok`.
 - `/synthesize_batch` returns ordered results.
-- `/synthesize_stream` framing preserves byte-exact WAV bytes and chunk order.
+- `/synthesize_stream` framing preserves byte-exact WAV bytes and chunk order, verified by a server-framer ↔ client-parser interop test exercising header versioning, `byte_length` boundaries, and `max_chunk_size` enforcement.
 - Sync/async clients can call the API and save or play returned WAVs with subprocess calls mocked in tests.
 - CLI read-aloud plays chunks in segment order even when stream chunks arrive out of order.
 - The installed console script `irodori-tts --help` runs successfully.
