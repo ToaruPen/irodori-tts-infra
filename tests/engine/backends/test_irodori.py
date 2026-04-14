@@ -343,6 +343,11 @@ def test_close_tolerates_runtime_without_unload() -> None:
 
     backend.close()
 
+    with pytest.raises(BackendUnavailableError, match="backend is closed"):
+        backend.synthesize(synthesis_request())
+    with pytest.raises(BackendUnavailableError, match="backend is closed"):
+        backend.warm_up()
+
 
 def test_factory_uses_injected_download_and_runtime_factory() -> None:
     settings = runtime_settings()
@@ -460,6 +465,25 @@ def test_factory_does_not_wrap_runtime_factory_type_error() -> None:
             runtime_settings(),
             hf_hub_download_fn=lambda **_kwargs: MODEL_PATH,
             runtime_factory=runtime_factory,
+            runtime_key_cls=FakeRuntimeKey,
+            save_wav_fn=fake_save_wav,
+            sampling_request_cls=FakeSamplingRequest,
+        )
+
+    assert exc_info.value is error
+
+
+def test_factory_does_not_wrap_injected_download_import_error() -> None:
+    error = ImportError("transitive import failed")
+
+    def download_fn(**_kwargs: object) -> str:
+        raise error
+
+    with pytest.raises(ImportError, match="transitive import failed") as exc_info:
+        create_irodori_backend(
+            runtime_settings(),
+            hf_hub_download_fn=download_fn,
+            runtime_factory=lambda _key: FakeRuntime(),
             runtime_key_cls=FakeRuntimeKey,
             save_wav_fn=fake_save_wav,
             sampling_request_cls=FakeSamplingRequest,

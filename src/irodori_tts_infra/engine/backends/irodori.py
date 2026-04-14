@@ -155,22 +155,22 @@ def create_irodori_backend(
     save_wav_fn: SaveWavFn | None = None,
     sampling_request_cls: RequestFactory | None = None,
 ) -> IrodoriVoiceDesignBackend:
-    try:
-        download_fn = hf_hub_download_fn or _import_hf_hub_download()
-        inference_runtime = _import_inference_runtime_if_needed(
-            runtime_factory=runtime_factory,
-            runtime_key_cls=runtime_key_cls,
-            save_wav_fn=save_wav_fn,
-            sampling_request_cls=sampling_request_cls,
-        )
-        resolved_runtime_key_cls = _runtime_key_cls(runtime_key_cls, inference_runtime)
-        resolved_runtime_factory = _runtime_factory(runtime_factory, inference_runtime)
-        resolved_save_wav_fn = _save_wav_fn(save_wav_fn, inference_runtime)
-        resolved_sampling_request_cls = _sampling_request_cls(
-            sampling_request_cls,
-            inference_runtime,
-        )
+    download_fn = hf_hub_download_fn or _import_hf_hub_download()
+    inference_runtime = _import_inference_runtime_if_needed(
+        runtime_factory=runtime_factory,
+        runtime_key_cls=runtime_key_cls,
+        save_wav_fn=save_wav_fn,
+        sampling_request_cls=sampling_request_cls,
+    )
+    resolved_runtime_key_cls = _runtime_key_cls(runtime_key_cls, inference_runtime)
+    resolved_runtime_factory = _runtime_factory(runtime_factory, inference_runtime)
+    resolved_save_wav_fn = _save_wav_fn(save_wav_fn, inference_runtime)
+    resolved_sampling_request_cls = _sampling_request_cls(
+        sampling_request_cls,
+        inference_runtime,
+    )
 
+    try:
         checkpoint = download_fn(
             repo_id=settings.checkpoint,
             filename=checkpoint_filename,
@@ -186,8 +186,6 @@ def create_irodori_backend(
         runtime = resolved_runtime_factory(runtime_key)
     except BackendUnavailableError:
         raise
-    except ImportError as exc:
-        raise BackendUnavailableError(INSTALL_HINT) from exc
     except (OSError, RuntimeError) as exc:
         msg = "Failed to create Irodori backend"
         raise BackendUnavailableError(msg) from exc
