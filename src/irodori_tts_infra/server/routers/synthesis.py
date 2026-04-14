@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from irodori_tts_infra.contracts import (
+    MAX_CHUNK_SIZE_BYTES,
     BatchSynthesisRequest,
     BatchSynthesisResult,
     StreamChunkHeader,
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 router = APIRouter()
+MAX_ALLOWED_CHUNK_SIZE = MAX_CHUNK_SIZE_BYTES
 
 PipelineDependency = Annotated[SynthesisPipeline, Depends(get_pipeline)]
 MaxChunkSizeDependency = Annotated[int, Depends(get_max_chunk_size)]
@@ -53,6 +55,7 @@ def synthesize_stream(
     pipeline: PipelineDependency,
     max_chunk_size: MaxChunkSizeDependency,
 ) -> StreamingResponse:
+    _validate_max_chunk_size(max_chunk_size)
     _validate_segment_order(request.segments)
     return StreamingResponse(
         _frame_stream(request.segments, pipeline, max_chunk_size),
@@ -94,6 +97,15 @@ def _split_wav_bytes(wav_bytes: bytes, max_chunk_size: int) -> list[bytes]:
         wav_bytes[index : index + max_chunk_size]
         for index in range(0, len(wav_bytes), max_chunk_size)
     ]
+
+
+def _validate_max_chunk_size(max_chunk_size: int) -> None:
+    if max_chunk_size <= 0:
+        msg = "max_chunk_size must be a positive integer"
+        raise HTTPException(status_code=400, detail=msg)
+    if max_chunk_size > MAX_ALLOWED_CHUNK_SIZE:
+        msg = f"max_chunk_size must be less than or equal to {MAX_ALLOWED_CHUNK_SIZE} bytes"
+        raise HTTPException(status_code=400, detail=msg)
 
 
 def _validate_segment_order(segments: Sequence[SynthesisSegment]) -> None:

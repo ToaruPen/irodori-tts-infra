@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from starlette import status
 
 from irodori_tts_infra.contracts import (
+    MAX_CHUNK_SIZE_BYTES,
     BatchSynthesisResult,
     StreamChunkHeader,
     StreamHandshakeHeader,
@@ -29,6 +30,7 @@ pytestmark = pytest.mark.unit
 
 STREAM_MAX_CHUNK_SIZE = 64
 SPLIT_STREAM_CHUNK_SIZE = 4
+TEST_EVENT_TIMEOUT = 5.0
 
 
 class BlockingSynthesizer:
@@ -39,7 +41,7 @@ class BlockingSynthesizer:
     def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
         del request
         self.entered.set()
-        assert self.release.wait(timeout=1.0)
+        assert _wait_for_event(self.release)
         return SynthesizedAudio(wav_bytes=b"RIFFblocked", sample_rate=24_000)
 
 
@@ -69,6 +71,41 @@ def test_synthesize_returns_synthesis_result(
     assert result.segment_index == 0
     assert result.wav_bytes == b"RIFFsingle"
     assert result.content_type == "audio/wav"
+
+
+def test_synthesize_returns_200_for_empty_wav_bytes(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        audio=SynthesizedAudio(wav_bytes=b"", sample_rate=24_000),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize",
+            json={"text": "本文", "caption": "声の説明。"},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    payload = response.json()
+    assert payload["segment_index"] == 0
+    assert "wav_bytes" in payload
+    assert payload["wav_bytes"] is not None
+    assert isinstance(payload["wav_bytes"], str)
+    assert not payload["wav_bytes"]
+    assert payload["content_type"] == "audio/wav"
+    result = SynthesisResult.model_validate_json(response.text)
+    assert result.segment_index == 0
+    assert result.wav_bytes == b""
+    assert result.elapsed_seconds >= 0.0
 
 
 def test_synthesize_validation_error_returns_422(
@@ -129,7 +166,7 @@ def test_synthesize_maps_backpressure_to_429(
 
         worker = threading.Thread(target=post_first)
         worker.start()
-        assert synthesizer.entered.wait(timeout=1.0)
+        assert _wait_for_event(synthesizer.entered)
 
         second = client.post(
             "/synthesize",
@@ -137,7 +174,7 @@ def test_synthesize_maps_backpressure_to_429(
         )
 
         synthesizer.release.set()
-        worker.join(timeout=1.0)
+        worker.join(timeout=TEST_EVENT_TIMEOUT)
         assert not worker.is_alive()
 
     assert second.status_code == status.HTTP_429_TOO_MANY_REQUESTS
@@ -178,6 +215,46 @@ def test_synthesize_batch_returns_ordered_results(
     result = BatchSynthesisResult.model_validate_json(response.text)
     assert [item.segment_index for item in result.results] == [0, 1]
     assert [item.wav_bytes for item in result.results] == [b"RIFFzero", b"RIFFone"]
+
+
+def test_synthesize_batch_returns_200_for_empty_wav_bytes(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        audio=SynthesizedAudio(wav_bytes=b"", sample_rate=24_000),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize_batch",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    payload = response.json()
+    assert payload["results"][0]["segment_index"] == 0
+    assert "wav_bytes" in payload["results"][0]
+    assert payload["results"][0]["wav_bytes"] is not None
+    assert isinstance(payload["results"][0]["wav_bytes"], str)
+    assert not payload["results"][0]["wav_bytes"]
+    assert payload["results"][0]["content_type"] == "audio/wav"
+    result = BatchSynthesisResult.model_validate_json(response.text)
+    assert len(result.results) == 1
+    assert result.results[0].segment_index == 0
+    assert result.results[0].wav_bytes == b""
+    assert result.results[0].elapsed_seconds >= 0.0
 
 
 def test_synthesize_batch_rejects_unordered_segment_indices(
@@ -310,6 +387,38 @@ def test_synthesize_stream_emits_terminal_header_for_empty_wav_bytes(
     assert payload == b""
 
 
+@pytest.mark.parametrize(
+    ("max_chunk_size", "expected_detail"),
+    [
+        (0, "max_chunk_size must be a positive integer"),
+        (
+            MAX_CHUNK_SIZE_BYTES + 1,
+            f"max_chunk_size must be less than or equal to {MAX_CHUNK_SIZE_BYTES} bytes",
+        ),
+    ],
+)
+def test_synthesize_stream_rejects_invalid_max_chunk_size(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    max_chunk_size: int,
+    expected_detail: str,
+) -> None:
+    app = create_app(pipeline_factory())
+    app.state.max_chunk_size = max_chunk_size
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["detail"] == expected_detail
+
+
 def test_synthesize_stream_invalid_unordered_segment_index(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
@@ -368,6 +477,10 @@ def _parse_stream(
         position += header.byte_length
 
     return handshake, chunks
+
+
+def _wait_for_event(event: threading.Event) -> bool:
+    return event.wait(timeout=TEST_EVENT_TIMEOUT)
 
 
 def _assert_validation_error_mentions(response: Response, field: str, message: str) -> None:
