@@ -62,16 +62,17 @@ class SynthesisPipeline:
             started = time.perf_counter()
             try:
                 audio = self._synthesizer.synthesize(request)
-                return SynthesisResult(
-                    segment_index=job.segment_index,
-                    wav_bytes=audio.wav_bytes,
-                    elapsed_seconds=round(time.perf_counter() - started, 3),
-                )
             except EngineError:
                 raise
             except Exception as exc:
                 msg = "Backend synthesize failed"
                 raise BackendUnavailableError(msg) from exc
+            elapsed_seconds = round(time.perf_counter() - started, 3)
+            return SynthesisResult(
+                segment_index=job.segment_index,
+                wav_bytes=audio.wav_bytes,
+                elapsed_seconds=elapsed_seconds,
+            )
         finally:
             self._semaphore.release()
 

@@ -36,8 +36,8 @@ C:\Users\user\irodori-tts-infra\.env
 ```
 
 The Windows `.env` should contain server/runtime settings such as
-`IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
-`IRODORI_TTS_PATH_TEMP_WAV_DIR`. Do not commit this file.
+`IRODORI_SERVER_PORT`, `IRODORI_RUNTIME_*`, and
+`IRODORI_PATH_TEMP_WAV_DIR`. Do not commit this file.
 
 ## Expected Layout
 

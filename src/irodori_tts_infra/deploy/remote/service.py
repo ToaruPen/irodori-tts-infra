@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import subprocess  # noqa: S404
-
-import structlog
+from typing import TYPE_CHECKING
 
 from irodori_tts_infra.config import ServerSettings
+from irodori_tts_infra.deploy.remote._common import _run
 from irodori_tts_infra.deploy.remote.bootstrap import _powershell, _ps_quote
 from irodori_tts_infra.deploy.remote.sync import (
     resolve_remote_dir,
     resolve_remote_host,
 )
 
-_LOGGER = structlog.get_logger(__name__)
+if TYPE_CHECKING:
+    import subprocess
+
 _APP_TARGET = "irodori_tts_infra.server.main:app"
 
 
@@ -69,7 +70,7 @@ def _start_script(remote_dir: str, *, server_host: str, port: int) -> str:
         "$process = Start-Process -FilePath 'uv' "
         "-ArgumentList @("
         f"'run', 'uvicorn', '{_APP_TARGET}', "
-        f"'--host', '{server_host}', '--port', '{port}'"
+        f"'--host', {_ps_quote(server_host)}, '--port', '{port}'"
         ") -PassThru -WindowStyle Hidden; "
         "Set-Content -LiteralPath $pidFile -Value $process.Id; "
         "Write-Output $process.Id"
@@ -101,14 +102,4 @@ def _status_script(remote_dir: str) -> str:
         'Write-Output "running $pid"; exit 0 }; '
         "Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue; "
         'Write-Output "stopped"; exit 1'
-    )
-
-
-def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    _LOGGER.info("deploy_remote_command", command=command)
-    return subprocess.run(  # noqa: S603
-        command,
-        capture_output=True,
-        check=check,
-        text=True,
     )

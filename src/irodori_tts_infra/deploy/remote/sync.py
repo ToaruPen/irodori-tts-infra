@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess  # noqa: S404
 from pathlib import Path
 
-import structlog
+from irodori_tts_infra.deploy.remote._common import _run
 
 DEFAULT_REMOTE_DIR = "C:/irodori-tts-infra"
 RSYNC_EXCLUDES = (
@@ -24,7 +23,6 @@ RSYNC_EXCLUDES = (
     "runs/",
 )
 _SYNC_ITEMS = ("src", "pyproject.toml", ".env.example")
-_LOGGER = structlog.get_logger(__name__)
 
 
 def sync_project(
@@ -68,25 +66,27 @@ def _rsync_command(remote_host: str, remote_dir: str, repo_root: Path) -> list[s
     command = ["rsync", "-az", "--delete", "-e", "ssh"]
     for pattern in RSYNC_EXCLUDES:
         command.extend(["--exclude", pattern])
+    remote_target = remote_host + ":" + _remote_dir_with_trailing_slash(remote_dir)
     command.extend(
         [
             str(repo_root / "src"),
             str(repo_root / "pyproject.toml"),
             str(repo_root / ".env.example"),
-            f"{remote_host}:{_remote_dir_with_trailing_slash(remote_dir)}",
+            remote_target,
         ],
     )
     return command
 
 
 def _scp_command(remote_host: str, remote_dir: str, repo_root: Path) -> list[str]:
+    remote_target = remote_host + ":" + _remote_dir_with_trailing_slash(remote_dir)
     return [
         "scp",
         "-r",
-        f"{repo_root / 'src'}",
+        str(repo_root / "src"),
         str(repo_root / "pyproject.toml"),
         str(repo_root / ".env.example"),
-        f"{remote_host}:{_remote_dir_with_trailing_slash(remote_dir)}",
+        remote_target,
     ]
 
 
@@ -113,13 +113,3 @@ def _powershell(script: str) -> str:
 
 def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
-
-
-def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    _LOGGER.info("deploy_remote_command", command=command)
-    return subprocess.run(  # noqa: S603
-        command,
-        capture_output=True,
-        check=check,
-        text=True,
-    )

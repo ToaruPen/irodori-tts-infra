@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import subprocess  # noqa: S404
-
-import structlog
-
+from irodori_tts_infra.deploy.remote._common import _run
 from irodori_tts_infra.deploy.remote.sync import (
     resolve_remote_dir,
     resolve_remote_host,
 )
-
-_LOGGER = structlog.get_logger(__name__)
 
 
 def bootstrap_remote(
@@ -39,13 +34,3 @@ def _powershell(script: str) -> str:
 
 def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
-
-
-def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    _LOGGER.info("deploy_remote_command", command=command)
-    return subprocess.run(  # noqa: S603
-        command,
-        capture_output=True,
-        check=check,
-        text=True,
-    )
