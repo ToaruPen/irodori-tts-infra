@@ -61,16 +61,16 @@ def test_load_characters_markdown_captures_distinct_attribute_keys() -> None:
 def test_load_characters_markdown_emits_multiple_blocks() -> None:
     content = dedent("""\
         ## 名前A
-        - **年齢**: 17歳
+        - **性格**: 明るい
 
         ## 名前B
-        - **年齢**: 20歳
+        - **性格**: 静か
     """)
 
     result = load_characters_markdown(content)
 
     assert set(result.keys()) == {"名前A", "名前B"}
-    assert result["名前A"].caption == "女性が、自然な口調で話している。"
+    assert result["名前A"].caption == "女性が、明るく楽しそうに話している。"
     assert result["名前B"].caption == "女性が、自然な口調で話している。"
 
 

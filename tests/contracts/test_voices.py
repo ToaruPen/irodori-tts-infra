@@ -9,8 +9,10 @@ pytestmark = pytest.mark.unit
 
 
 def test_voice_profile_rejects_blank_name() -> None:
-    with pytest.raises(ValidationError, match="must not be blank"):
-        VoiceProfileResponse(name=" ", caption="...")
+    with pytest.raises(ValidationError) as exc_info:
+        VoiceProfileResponse(name=" ", caption="y")
+
+    assert any(err.get("loc") == ("name",) for err in exc_info.value.errors())
 
 
 def test_voice_profile_rejects_scalar_aliases() -> None:
