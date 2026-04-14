@@ -183,13 +183,13 @@ def _synthesize_audio_segments(
 
 def _save_audio_segments(audio_segments: Iterable[AudioSegment], save_dir: Path) -> int:
     save_dir.mkdir(parents=True, exist_ok=True)
-    for wav_path in save_dir.glob("*.wav"):
+    for wav_path in save_dir.glob("segment-[0-9][0-9][0-9][0-9].wav"):
         if wav_path.is_file():
             wav_path.unlink()
 
     saved = 0
     for segment_index, wav_bytes in audio_segments:
-        (save_dir / f"{segment_index:04d}.wav").write_bytes(wav_bytes)
+        (save_dir / f"segment-{segment_index:04d}.wav").write_bytes(wav_bytes)
         saved += 1
     return saved
 

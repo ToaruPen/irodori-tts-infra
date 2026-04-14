@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 class FakeSyncIrodoriClient:
     instances: ClassVar[list[FakeSyncIrodoriClient]] = []
     events: ClassVar[list[tuple[str, str | bytes]]] = []
-    wav_by_text: ClassVar[dict[str, bytes]] = {}
+    wav_chunks_by_text: ClassVar[dict[str, list[bytes]]] = {}
 
     def __init__(self, *, base_url: str | None = None) -> None:
         self.base_url = base_url
@@ -46,7 +46,7 @@ class FakeSyncIrodoriClient:
     def synthesize_stream(self, request: SynthesisRequest) -> Iterator[bytes]:
         self.requests.append(request)
         self.events.append(("synthesize", request.text))
-        yield self.wav_by_text[request.text]
+        yield from self.wav_chunks_by_text[request.text]
 
 
 def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
@@ -64,10 +64,10 @@ def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
     )
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
-    FakeSyncIrodoriClient.wav_by_text = {
-        "地の文です。": b"narration-wav",
-        "こんにちは": b"known-wav",
-        "だれ?": b"unknown-wav",
+    FakeSyncIrodoriClient.wav_chunks_by_text = {
+        "地の文です。": [b"narration-", b"wav"],
+        "こんにちは": [b"known-wav"],
+        "だれ?": [b"unknown-wav"],
     }
     played_audio: list[bytes] = []
 
@@ -119,9 +119,9 @@ def test_read_aloud_uses_default_profile_without_characters_markdown(
     save_dir = tmp_path / "audio"
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
-    FakeSyncIrodoriClient.wav_by_text = {
-        "地の文です。": b"narration-wav",
-        "こんにちは": b"dialogue-wav",
+    FakeSyncIrodoriClient.wav_chunks_by_text = {
+        "地の文です。": [b"narration-wav"],
+        "こんにちは": [b"dialogue-wav"],
     }
     monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
 
@@ -136,8 +136,8 @@ def test_read_aloud_uses_default_profile_without_characters_markdown(
         DEFAULT_NARRATOR_CAPTION,
         DEFAULT_GENERIC_DIALOGUE_CAPTION,
     ]
-    assert (save_dir / "0000.wav").read_bytes() == b"narration-wav"
-    assert (save_dir / "0001.wav").read_bytes() == b"dialogue-wav"
+    assert (save_dir / "segment-0000.wav").read_bytes() == b"narration-wav"
+    assert (save_dir / "segment-0001.wav").read_bytes() == b"dialogue-wav"
 
 
 def test_read_aloud_remote_host_override_builds_client_base_url(
@@ -148,7 +148,7 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
     turn_file.write_text("本文です。", encoding="utf-8")
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
-    FakeSyncIrodoriClient.wav_by_text = {"本文です。": b"wav"}
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
     monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
 
     def fake_run(_command: list[str], *, check: bool) -> None:
@@ -173,12 +173,14 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
     turn_file.write_text("一。\n二。", encoding="utf-8")
     save_dir = tmp_path / "wav"
     save_dir.mkdir()
-    (save_dir / "0000.wav").write_bytes(b"old-first")
-    (save_dir / "0001.wav").write_bytes(b"stale-second")
+    (save_dir / "segment-0000.wav").write_bytes(b"old-first")
+    (save_dir / "segment-0001.wav").write_bytes(b"stale-second")
+    (save_dir / "0000.wav").write_bytes(b"user-numeric-wav")
+    (save_dir / "personal.wav").write_bytes(b"user-wav")
     (save_dir / "notes.txt").write_text("keep me", encoding="utf-8")
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
-    FakeSyncIrodoriClient.wav_by_text = {"一。二。": b"combined-wav"}
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"一。二。": [b"combined-wav"]}
     playback_calls: list[list[str]] = []
 
     def fake_run(command: list[str], *, check: bool) -> None:
@@ -195,6 +197,64 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
 
     assert result.exit_code == 0, result.output
     assert playback_calls == []
-    assert (save_dir / "0000.wav").read_bytes() == b"combined-wav"
-    assert not (save_dir / "0001.wav").exists()
+    assert (save_dir / "segment-0000.wav").read_bytes() == b"combined-wav"
+    assert not (save_dir / "segment-0001.wav").exists()
+    assert (save_dir / "0000.wav").read_bytes() == b"user-numeric-wav"
+    assert (save_dir / "personal.wav").read_bytes() == b"user-wav"
     assert (save_dir / "notes.txt").read_text(encoding="utf-8") == "keep me"
+
+
+def test_read_aloud_blank_narrator_caption_exits_with_error(tmp_path: Path) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["read-aloud", str(turn_file), "--narrator-caption", "   "],
+    )
+
+    assert result.exit_code != 0
+    assert "narrator caption must not be blank" in result.output
+
+
+def test_read_aloud_blank_remote_host_exits_with_error(tmp_path: Path) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["read-aloud", str(turn_file), "--remote-host", "   "],
+    )
+
+    assert result.exit_code != 0
+    assert "remote host must not be blank" in result.output
+
+
+def test_read_aloud_blank_player_command_exits_with_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["read-aloud", str(turn_file), "--player-command", "   "],
+    )
+
+    assert result.exit_code != 0
+    assert "player command must not be blank" in result.output
+
+
+def test_read_aloud_empty_turn_file_exits_with_error(tmp_path: Path) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("", encoding="utf-8")
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code != 0
+    assert "turn file contains no readable segments" in result.output
