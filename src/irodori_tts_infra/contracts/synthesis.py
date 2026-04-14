@@ -68,22 +68,40 @@ class BatchSynthesisResult(_ContractModel):
         return self
 
 
+STREAM_HEADER_VERSION = 1
+MAX_CHUNK_SIZE_BYTES = 4 * 1024 * 1024
+MAX_SEGMENT_INDEX = (2**32) - 1
+
+
 class StreamChunkHeader(_ContractModel):
+    header_version: int = Field(
+        default=STREAM_HEADER_VERSION,
+        ge=1,
+        serialization_alias="v",
+        validation_alias=AliasChoices("header_version", "v"),
+    )
     segment_index: int = Field(
         ge=0,
+        le=MAX_SEGMENT_INDEX,
         serialization_alias="index",
         validation_alias=AliasChoices("segment_index", "index"),
+    )
+    byte_length: int = Field(
+        ge=0,
+        le=MAX_CHUNK_SIZE_BYTES,
+        serialization_alias="nbytes",
+        validation_alias=AliasChoices("byte_length", "nbytes"),
+    )
+    final: bool = Field(
+        default=False,
+        serialization_alias="final",
+        validation_alias=AliasChoices("final"),
     )
     elapsed_seconds: float = Field(
         default=0.0,
         ge=0.0,
         serialization_alias="elapsed",
         validation_alias=AliasChoices("elapsed_seconds", "elapsed"),
-    )
-    byte_length: int = Field(
-        ge=0,
-        serialization_alias="nbytes",
-        validation_alias=AliasChoices("byte_length", "nbytes"),
     )
 
     @field_serializer("elapsed_seconds", when_used="json")

@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from irodori_tts_infra.contracts import (
+    MAX_CHUNK_SIZE_BYTES,
+    MAX_SEGMENT_INDEX,
+    STREAM_HEADER_VERSION,
     BatchSynthesisRequest,
     BatchSynthesisResult,
     ErrorPayload,
@@ -95,15 +98,48 @@ def test_stream_header_serialization_reconstructs_byte_exact_chunks() -> None:
             segment_index=index,
             byte_length=len(payload),
             elapsed_seconds=0.123 + index,
+            final=index == len(payloads) - 1,
         ).to_bytes()
         + payload
         for index, payload in enumerate(payloads)
     )
 
     reader = BytesIO(stream)
-    reconstructed: list[tuple[int, bytes]] = []
+    reconstructed: list[tuple[int, bytes, bool, int]] = []
     while header_line := reader.readline():
         header = StreamChunkHeader.from_bytes(header_line)
-        reconstructed.append((header.segment_index, reader.read(header.byte_length)))
+        reconstructed.append(
+            (
+                header.segment_index,
+                reader.read(header.byte_length),
+                header.final,
+                header.header_version,
+            ),
+        )
 
-    assert reconstructed == list(enumerate(payloads))
+    assert reconstructed == [
+        (0, payloads[0], False, STREAM_HEADER_VERSION),
+        (1, payloads[1], True, STREAM_HEADER_VERSION),
+    ]
+
+
+def test_stream_header_boundary_values() -> None:
+    zero = StreamChunkHeader(segment_index=0, byte_length=0, final=True)
+    assert StreamChunkHeader.from_bytes(zero.to_bytes()) == zero
+
+    at_max = StreamChunkHeader(segment_index=0, byte_length=MAX_CHUNK_SIZE_BYTES)
+    assert at_max.byte_length == MAX_CHUNK_SIZE_BYTES
+
+    with pytest.raises(ValidationError, match="byte_length"):
+        StreamChunkHeader(segment_index=0, byte_length=MAX_CHUNK_SIZE_BYTES + 1)
+
+    at_index_cap = StreamChunkHeader(segment_index=MAX_SEGMENT_INDEX, byte_length=0)
+    assert at_index_cap.segment_index == MAX_SEGMENT_INDEX
+    with pytest.raises(ValidationError, match="segment_index"):
+        StreamChunkHeader(segment_index=MAX_SEGMENT_INDEX + 1, byte_length=0)
+
+
+def test_stream_header_defaults_include_version() -> None:
+    header = StreamChunkHeader(segment_index=3, byte_length=128)
+    assert header.header_version == STREAM_HEADER_VERSION
+    assert header.final is False
