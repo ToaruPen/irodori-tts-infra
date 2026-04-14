@@ -132,6 +132,13 @@ def wait_for_call(fake: BlockingSynthesizer, call_index: int) -> threading.Event
     return event
 
 
+def test_pipeline_exposes_backend() -> None:
+    synthesizer = FakeSynthesizer()
+    pipeline = make_pipeline(synthesizer)
+
+    assert pipeline.backend is synthesizer
+
+
 def _run_in_thread(
     fn: Callable[[], object],
 ) -> tuple[threading.Thread, Queue[object]]:

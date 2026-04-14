@@ -36,6 +36,10 @@ class SynthesisPipeline:
         self._config = config or PipelineConfig()
         self._semaphore = threading.BoundedSemaphore(self._config.capacity)
 
+    @property
+    def backend(self) -> Synthesizer:
+        return self._synthesizer
+
     def plan_segment(self, segment_index: int, segment: Segment) -> SynthesisJob:
         caption = (
             self._voice_profile.narrator_caption
