@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
 from typing_extensions import override
 
+from irodori_tts_infra.client import sync as sync_client
 from irodori_tts_infra.client.errors import (
     ClientBackpressureError,
     ClientError,
@@ -26,7 +27,7 @@ from irodori_tts_infra.contracts import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from pydantic import BaseModel
 
@@ -229,6 +230,12 @@ def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: str) ->
 
     with pytest.raises(ClientError, match=match):
         list(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
+
+
+@pytest.mark.parametrize("header", [b'{"kind":1}\n', b'{"kind":false}\n', b'{"kind":[]}\n'])
+def test_header_kind_ignores_non_string_kind(header: bytes) -> None:
+    header_kind = cast("Callable[[bytes], str | None]", vars(sync_client)["_header_kind"])
+    assert header_kind(header) is None
 
 
 @pytest.mark.parametrize(

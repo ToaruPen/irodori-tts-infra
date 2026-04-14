@@ -255,8 +255,9 @@ def _header_kind(header_line: bytes) -> str | None:
         raise ClientError(message, code="protocol_error") from exc
     if not isinstance(data, dict):
         _raise_protocol_error("stream header must be a JSON object")
-    data = cast("dict[str, str | None]", data)
-    return data.get("kind")
+    data = cast("dict[str, object]", data)
+    value = data.get("kind")
+    return value if isinstance(value, str) else None
 
 
 def _parse_handshake(header_line: bytes) -> StreamHandshakeHeader:
