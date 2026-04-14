@@ -11,6 +11,10 @@ def test_parse_speaker_tag_accepts_name_only_tag() -> None:
     assert parse_speaker_tag("【チヅル】") == SpeakerTag(name="チヅル")
 
 
+def test_parse_speaker_tag_accepts_tag_with_outer_whitespace() -> None:
+    assert parse_speaker_tag(" 【チヅル】 ") == SpeakerTag(name="チヅル")
+
+
 def test_parse_speaker_tag_accepts_voice_direction() -> None:
     assert parse_speaker_tag("【チヅル:穏やかに微笑みながら】") == SpeakerTag(
         name="チヅル",
@@ -24,6 +28,7 @@ def test_parse_speaker_tag_accepts_voice_direction() -> None:
         "【チヅル】「おやすみなさい」",
         "【】",
         "【チヅル:】",
+        "【チヅル:   】",
         "【:小声で】",
         "チヅル",
         "【チヅル",

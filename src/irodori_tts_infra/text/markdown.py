@@ -41,7 +41,7 @@ def strip_turn_metadata(content: str) -> str:
     before_marker = content[:marker_index]
     separator_matches = list(SEPARATOR_LINE_RE.finditer(before_marker))
     if not separator_matches:
-        return before_marker.rstrip("\n")
+        return content
 
     return before_marker[: separator_matches[-1].start()].rstrip("\n")
 

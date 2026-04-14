@@ -83,6 +83,25 @@ def test_strip_turn_metadata_removes_block_after_separator_and_marker() -> None:
     ]
 
 
+def test_strip_turn_metadata_preserves_marker_without_separator() -> None:
+    content = f"""本文の前半です。
+{METADATA_MARKER}
+これは本文として扱う。
+"""
+
+    stripped = strip_turn_metadata(content)
+
+    assert METADATA_MARKER in stripped
+    assert "本文の前半です。" in stripped
+    assert "これは本文として扱う。" in stripped
+    assert parse_turn_markdown(content) == [
+        Segment(
+            kind=SegmentKind.NARRATION,
+            text=f"本文の前半です。{METADATA_MARKER}これは本文として扱う。",
+        ),
+    ]
+
+
 def test_parse_turn_markdown_preserves_inner_japanese_corner_quotes() -> None:
     content = "【チヅル】「『相性表』を見ましたか?」\n「『はい』と答えた。」"
 
