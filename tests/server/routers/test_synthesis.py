@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 STREAM_MAX_CHUNK_SIZE = 64
+SPLIT_STREAM_CHUNK_SIZE = 4
 
 
 class BlockingSynthesizer:
@@ -82,6 +83,7 @@ def test_synthesize_validation_error_returns_422(
         )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    _assert_validation_error_mentions(response, "text", "blank")
 
 
 def test_synthesize_maps_backend_unavailable_to_503(
@@ -197,6 +199,41 @@ def test_synthesize_batch_rejects_unordered_segment_indices(
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
+def test_synthesize_batch_validation_error_returns_422(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_batch",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": " ", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    _assert_validation_error_mentions(response, "text", "blank")
+
+
+def test_synthesize_returns_500_when_pipeline_missing(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(pipeline_factory())
+    app.state.pipeline = None
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize",
+            json={"text": "本文", "caption": "声の説明。"},
+        )
+
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert response.json() == {"detail": "Synthesis pipeline is not configured"}
+
+
 def test_synthesize_stream_preserves_bytes_and_segment_order(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
@@ -214,7 +251,7 @@ def test_synthesize_stream_preserves_bytes_and_segment_order(
             ),
         ),
     )
-    app.state.max_chunk_size = STREAM_MAX_CHUNK_SIZE
+    app.state.max_chunk_size = SPLIT_STREAM_CHUNK_SIZE
 
     with TestClient(app) as client:
         response = client.post(
@@ -229,10 +266,10 @@ def test_synthesize_stream_preserves_bytes_and_segment_order(
 
     assert response.status_code == status.HTTP_200_OK
     handshake, chunks = _parse_stream(response.content)
-    assert handshake.max_chunk_size == STREAM_MAX_CHUNK_SIZE
-    assert [header.segment_index for header, _ in chunks] == [0, 1]
-    assert [payload for _, payload in chunks] == [b"RIFFzero", b"RIFFone"]
-    assert [header.final for header, _ in chunks] == [False, True]
+    assert handshake.max_chunk_size == SPLIT_STREAM_CHUNK_SIZE
+    assert [header.segment_index for header, _ in chunks] == [0, 0, 1, 1]
+    assert [payload for _, payload in chunks] == [b"RIFF", b"zero", b"RIFF", b"one"]
+    assert [header.final for header, _ in chunks] == [False, True, False, True]
     assert b"".join(payload for _, payload in chunks) == b"RIFFzeroRIFFone"
 
 
@@ -255,3 +292,10 @@ def _parse_stream(
         position += header.byte_length
 
     return handshake, chunks
+
+
+def _assert_validation_error_mentions(response: Response, field: str, message: str) -> None:
+    detail = response.json()["detail"]
+    assert isinstance(detail, list)
+    assert any(field in entry["loc"] for entry in detail)
+    assert any(message in entry["msg"].lower() for entry in detail)

@@ -67,20 +67,18 @@ def _frame_stream(
 ) -> Iterator[bytes]:
     yield StreamHandshakeHeader(max_chunk_size=max_chunk_size).to_bytes()
 
-    frame_index = 0
-    for segment_offset, segment in enumerate(segments):
+    for segment in segments:
         result = pipeline.synthesize_job(_job_from_segment(segment))
         chunks = _split_wav_bytes(result.wav_bytes, max_chunk_size)
         for chunk_offset, chunk in enumerate(chunks):
-            is_final = segment_offset == len(segments) - 1 and chunk_offset == len(chunks) - 1
+            is_final = chunk_offset == len(chunks) - 1
             yield StreamChunkHeader(
-                segment_index=frame_index,
+                segment_index=segment.segment_index,
                 byte_length=len(chunk),
                 final=is_final,
                 elapsed_seconds=result.elapsed_seconds,
             ).to_bytes()
             yield chunk
-            frame_index += 1
 
 
 def _split_wav_bytes(wav_bytes: bytes, max_chunk_size: int) -> list[bytes]:

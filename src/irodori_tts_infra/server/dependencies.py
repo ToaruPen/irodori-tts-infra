@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from fastapi import Request  # noqa: TC002
+from fastapi import HTTPException, Request
 
 from irodori_tts_infra.contracts import MAX_CHUNK_SIZE_BYTES, HealthResponse
 
@@ -11,7 +11,11 @@ if TYPE_CHECKING:
 
 
 def get_pipeline(request: Request) -> SynthesisPipeline:
-    return cast("SynthesisPipeline", request.app.state.pipeline)
+    pipeline = getattr(request.app.state, "pipeline", None)
+    if pipeline is None:
+        msg = "Synthesis pipeline is not configured"
+        raise HTTPException(status_code=500, detail=msg)
+    return cast("SynthesisPipeline", pipeline)
 
 
 def get_max_chunk_size(request: Request) -> int:

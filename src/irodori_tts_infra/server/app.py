@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from contextlib import AsyncExitStack, asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from fastapi import FastAPI
@@ -28,27 +29,26 @@ class _ClosableBackend(Protocol):
 
 
 def create_app(pipeline: SynthesisPipeline) -> FastAPI:
-    backend = getattr(pipeline, "_synthesizer", None)
+    backend = pipeline.backend
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async with AsyncExitStack():
-            if isinstance(backend, _WarmableBackend):
-                try:
-                    backend.warm_up()
-                except BackendUnavailableError as exc:
-                    app.state.model_loaded = False
-                    app.state.health_detail = str(exc)
-                else:
-                    app.state.model_loaded = True
+        if isinstance(backend, _WarmableBackend):
+            try:
+                await asyncio.to_thread(backend.warm_up)
+            except BackendUnavailableError as exc:
+                app.state.model_loaded = False
+                app.state.health_detail = str(exc)
             else:
                 app.state.model_loaded = True
+        else:
+            app.state.model_loaded = True
 
-            try:
-                yield
-            finally:
-                if isinstance(backend, _ClosableBackend):
-                    backend.close()
+        try:
+            yield
+        finally:
+            if isinstance(backend, _ClosableBackend):
+                backend.close()
 
     app = FastAPI(lifespan=lifespan)
     app.state.pipeline = pipeline
