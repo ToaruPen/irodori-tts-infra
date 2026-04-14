@@ -51,6 +51,18 @@ def test_parse_turn_markdown_treats_bare_dialogue_as_unknown_speaker() -> None:
     ]
 
 
+def test_parse_turn_markdown_treats_tagged_empty_quote_as_narration() -> None:
+    assert parse_turn_markdown("【チヅル】「」") == [
+        Segment(kind=SegmentKind.NARRATION, text="【チヅル】「」"),
+    ]
+
+
+def test_parse_turn_markdown_treats_bare_empty_quote_as_narration() -> None:
+    assert parse_turn_markdown("「」") == [
+        Segment(kind=SegmentKind.NARRATION, text="「」"),
+    ]
+
+
 def test_parse_turn_markdown_skips_headings_and_horizontal_rules() -> None:
     content = """
 # Scene title

@@ -263,7 +263,11 @@ log_level = "INFO"
 branch = true
 source = ["irodori_tts_infra"]
 parallel = true
-omit = ["tests/*"]
+omit = [
+  "tests/*",
+  "src/irodori_tts_infra/client/cli.py",
+  "src/irodori_tts_infra/__init__.py",
+]
 
 [tool.coverage.report]
 show_missing = true

@@ -15,6 +15,10 @@ from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.backends.irodori import (
     INSTALL_HINT,
     IrodoriVoiceDesignBackend,
+    _runtime_factory,  # noqa: PLC2701
+    _runtime_key_cls,  # noqa: PLC2701
+    _sampling_request_cls,  # noqa: PLC2701
+    _save_wav_fn,  # noqa: PLC2701
     create_irodori_backend,
 )
 from irodori_tts_infra.engine.errors import BackendUnavailableError
@@ -26,6 +30,9 @@ from irodori_tts_infra.voice_bank import CharacterVoice, VoiceProfile
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from irodori_tts_infra.engine.backends.irodori import (
+        _InferenceRuntimeModule,
+    )
     from irodori_tts_infra.engine.protocols import Synthesizer
 
 pytestmark = pytest.mark.unit
@@ -142,6 +149,24 @@ class TensorLikeAudio:
     def cpu(self) -> TensorLikeAudio:
         self.cpu_count += 1
         return self
+
+
+class _FakeInferenceRuntime:
+    RuntimeKey = object
+    SamplingRequest = object
+
+    class InferenceRuntime:
+        @staticmethod
+        def from_key(_key: object) -> object:
+            return object()
+
+    @staticmethod
+    def save_wav(_path: str, _audio: object, _sample_rate: int) -> None:
+        return None
+
+
+def fake_inference_runtime_module() -> _InferenceRuntimeModule:
+    return cast("_InferenceRuntimeModule", _FakeInferenceRuntime)
 
 
 def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
@@ -380,6 +405,31 @@ def test_factory_uses_injected_download_and_runtime_factory() -> None:
     assert runtime_keys[0].model_precision == "bf16"
     assert runtime_keys[0].codec_device == "cuda"
     assert runtime_keys[0].codec_precision == "fp32"
+
+
+def test_runtime_key_cls_falls_back_to_module_attr() -> None:
+    module = fake_inference_runtime_module()
+
+    assert _runtime_key_cls(None, module) is _FakeInferenceRuntime.RuntimeKey
+
+
+def test_runtime_factory_falls_back_to_module_attr() -> None:
+    module = fake_inference_runtime_module()
+    resolved = _runtime_factory(None, module)
+
+    assert resolved is module.InferenceRuntime.from_key
+
+
+def test_save_wav_fn_falls_back_to_module_attr() -> None:
+    module = fake_inference_runtime_module()
+
+    assert _save_wav_fn(None, module) is _FakeInferenceRuntime.save_wav
+
+
+def test_sampling_request_cls_falls_back_to_module_attr() -> None:
+    module = fake_inference_runtime_module()
+
+    assert _sampling_request_cls(None, module) is _FakeInferenceRuntime.SamplingRequest
 
 
 def test_factory_raises_backend_unavailable_on_missing_optional_deps() -> None:
