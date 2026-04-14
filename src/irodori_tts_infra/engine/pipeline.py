@@ -4,18 +4,14 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from irodori_tts_infra.contracts.synthesis import (
-    BatchSynthesisResult,
-    SynthesisRequest,
-    SynthesisResult,
-)
+from irodori_tts_infra.contracts.synthesis import BatchSynthesisResult, SynthesisResult
 from irodori_tts_infra.engine.errors import (
     BackendUnavailableError,
     BackpressureError,
     EmptyBatchError,
     EngineError,
 )
-from irodori_tts_infra.engine.models import PipelineConfig, SynthesisJob, SynthesizedAudio
+from irodori_tts_infra.engine.models import PipelineConfig, SynthesisJob
 from irodori_tts_infra.text.models import SegmentKind
 from irodori_tts_infra.voice_bank import resolve_segment_caption
 
@@ -64,7 +60,13 @@ class SynthesisPipeline:
         try:
             request = job.to_request()
             started = time.perf_counter()
-            audio = self._synthesize_backend(request)
+            try:
+                audio = self._synthesizer.synthesize(request)
+            except EngineError:
+                raise
+            except Exception as exc:
+                msg = "Backend synthesize failed"
+                raise BackendUnavailableError(msg) from exc
             elapsed_seconds = round(time.perf_counter() - started, 3)
             return SynthesisResult(
                 segment_index=job.segment_index,
@@ -73,15 +75,6 @@ class SynthesisPipeline:
             )
         finally:
             self._semaphore.release()
-
-    def _synthesize_backend(self, request: SynthesisRequest) -> SynthesizedAudio:
-        try:
-            return self._synthesizer.synthesize(request)
-        except EngineError:
-            raise
-        except Exception as exc:
-            msg = "Backend synthesize failed"
-            raise BackendUnavailableError(msg) from exc
 
     def synthesize_batch(self, segments: Iterable[Segment]) -> BatchSynthesisResult:
         jobs = self._plan_segments(segments)

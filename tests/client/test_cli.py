@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 
 class FakeSyncIrodoriClient:
     instances: ClassVar[list[FakeSyncIrodoriClient]] = []
+    events: ClassVar[list[tuple[str, str | bytes]]] = []
     wav_by_text: ClassVar[dict[str, bytes]] = {}
 
     def __init__(self, *, base_url: str | None = None) -> None:
@@ -44,15 +45,8 @@ class FakeSyncIrodoriClient:
 
     def synthesize_stream(self, request: SynthesisRequest) -> Iterator[bytes]:
         self.requests.append(request)
+        self.events.append(("synthesize", request.text))
         yield self.wav_by_text[request.text]
-
-
-def test_order_audio_segments_reassembles_out_of_order_chunks() -> None:
-    ordered = cli._order_audio_segments(  # noqa: SLF001
-        [(2, b"third"), (0, b"first"), (1, b"second")]
-    )
-
-    assert ordered == [(0, b"first"), (1, b"second"), (2, b"third")]
 
 
 def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
@@ -69,6 +63,7 @@ def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
         encoding="utf-8",
     )
     FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_by_text = {
         "地の文です。": b"narration-wav",
         "こんにちは": b"known-wav",
@@ -80,6 +75,7 @@ def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
         assert check is True
         assert command[0] == "afplay"
         played_audio.append(Path(command[-1]).read_bytes())
+        FakeSyncIrodoriClient.events.append(("play", played_audio[-1]))
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
@@ -89,6 +85,14 @@ def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
 
     assert result.exit_code == 0, result.output
     assert played_audio == [b"narration-wav", b"known-wav", b"unknown-wav"]
+    assert FakeSyncIrodoriClient.events == [
+        ("synthesize", "地の文です。"),
+        ("play", b"narration-wav"),
+        ("synthesize", "こんにちは"),
+        ("play", b"known-wav"),
+        ("synthesize", "だれ?"),
+        ("play", b"unknown-wav"),
+    ]
     client = FakeSyncIrodoriClient.instances[0]
     assert client.closed is True
     assert [request.text for request in client.requests] == ["地の文です。", "こんにちは", "だれ?"]
@@ -114,6 +118,7 @@ def test_read_aloud_uses_default_profile_without_characters_markdown(
     turn_file.write_text("地の文です。\n「こんにちは」\n", encoding="utf-8")
     save_dir = tmp_path / "audio"
     FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_by_text = {
         "地の文です。": b"narration-wav",
         "こんにちは": b"dialogue-wav",
@@ -142,6 +147,7 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
     FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_by_text = {"本文です。": b"wav"}
     monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
 
@@ -159,14 +165,19 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
     assert FakeSyncIrodoriClient.instances[0].base_url == "http://100.112.161.83:8923"
 
 
-def test_read_aloud_save_dir_writes_ordered_audio_files_and_skips_playback(
+def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("一。\n二。", encoding="utf-8")
     save_dir = tmp_path / "wav"
+    save_dir.mkdir()
+    (save_dir / "0000.wav").write_bytes(b"old-first")
+    (save_dir / "0001.wav").write_bytes(b"stale-second")
+    (save_dir / "notes.txt").write_text("keep me", encoding="utf-8")
     FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_by_text = {"一。二。": b"combined-wav"}
     playback_calls: list[list[str]] = []
 
@@ -185,3 +196,5 @@ def test_read_aloud_save_dir_writes_ordered_audio_files_and_skips_playback(
     assert result.exit_code == 0, result.output
     assert playback_calls == []
     assert (save_dir / "0000.wav").read_bytes() == b"combined-wav"
+    assert not (save_dir / "0001.wav").exists()
+    assert (save_dir / "notes.txt").read_text(encoding="utf-8") == "keep me"

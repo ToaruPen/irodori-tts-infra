@@ -3,7 +3,6 @@ from __future__ import annotations
 import shlex
 import subprocess  # noqa: S404
 import tempfile
-from operator import itemgetter
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -23,6 +22,8 @@ from irodori_tts_infra.voice_bank import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from irodori_tts_infra.voice_bank.models import VoiceProfile
 
 app = typer.Typer(no_args_is_help=True)
@@ -123,13 +124,12 @@ def read_aloud(
     base_url = _base_url_from_remote_host(remote_host)
     with SyncIrodoriClient(base_url=base_url) as client:
         audio_segments = _synthesize_audio_segments(client, segments, profile)
+        if save_dir is not None:
+            saved = _save_audio_segments(audio_segments, save_dir)
+            typer.echo(f"Saved {saved} WAV file(s) to {save_dir}")
+            return
 
-    if save_dir is not None:
-        saved = _save_audio_segments(audio_segments, save_dir)
-        typer.echo(f"Saved {saved} WAV file(s) to {save_dir}")
-        return
-
-    _play_audio_segments(audio_segments, _player_command_parts(player_command))
+        _play_audio_segments(audio_segments, _player_command_parts(player_command))
 
 
 def _load_profile(
@@ -168,8 +168,7 @@ def _synthesize_audio_segments(
     client: SyncIrodoriClient,
     segments: list[Segment],
     profile: VoiceProfile,
-) -> list[AudioSegment]:
-    audio_segments: list[AudioSegment] = []
+) -> Iterator[AudioSegment]:
     with Progress() as progress:
         task_id = progress.add_task("Synthesizing", total=len(segments))
         for segment_index, segment in enumerate(segments):
@@ -178,29 +177,24 @@ def _synthesize_audio_segments(
                 caption=resolve_segment_caption(segment, profile),
             )
             wav_bytes = b"".join(client.synthesize_stream(request))
-            audio_segments.append((segment_index, wav_bytes))
+            yield segment_index, wav_bytes
             progress.advance(task_id)
-    return _order_audio_segments(audio_segments)
 
 
-def _order_audio_segments(audio_segments: list[AudioSegment]) -> list[AudioSegment]:
-    ordered = sorted(audio_segments, key=itemgetter(0))
-    actual = [segment_index for segment_index, _wav_bytes in ordered]
-    expected = list(range(len(ordered)))
-    if actual != expected:
-        message = "synthesis stream returned non-contiguous segment indexes"
-        raise typer.BadParameter(message)
-    return ordered
-
-
-def _save_audio_segments(audio_segments: list[AudioSegment], save_dir: Path) -> int:
+def _save_audio_segments(audio_segments: Iterable[AudioSegment], save_dir: Path) -> int:
     save_dir.mkdir(parents=True, exist_ok=True)
+    for wav_path in save_dir.glob("*.wav"):
+        if wav_path.is_file():
+            wav_path.unlink()
+
+    saved = 0
     for segment_index, wav_bytes in audio_segments:
         (save_dir / f"{segment_index:04d}.wav").write_bytes(wav_bytes)
-    return len(audio_segments)
+        saved += 1
+    return saved
 
 
-def _play_audio_segments(audio_segments: list[AudioSegment], player_command: list[str]) -> None:
+def _play_audio_segments(audio_segments: Iterable[AudioSegment], player_command: list[str]) -> None:
     for segment_index, wav_bytes in audio_segments:
         _play_wav_bytes(wav_bytes, player_command, segment_index=segment_index)
 
