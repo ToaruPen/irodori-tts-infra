@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess  # noqa: S404
 import tempfile
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(no_args_is_help=True)
 AudioSegment = tuple[int, bytes]
+_SEGMENT_WAV_RE = re.compile(r"^segment-(\d+)\.wav$")
 
 
 def _version_callback(value: bool) -> None:  # noqa: FBT001
@@ -183,8 +185,8 @@ def _synthesize_audio_segments(
 
 def _save_audio_segments(audio_segments: Iterable[AudioSegment], save_dir: Path) -> int:
     save_dir.mkdir(parents=True, exist_ok=True)
-    for wav_path in save_dir.glob("segment-[0-9][0-9][0-9][0-9].wav"):
-        if wav_path.is_file():
+    for wav_path in save_dir.glob("segment-*.wav"):
+        if wav_path.is_file() and _SEGMENT_WAV_RE.match(wav_path.name):
             wav_path.unlink()
 
     saved = 0

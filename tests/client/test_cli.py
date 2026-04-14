@@ -103,6 +103,34 @@ def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
     assert client.requests[2].caption == DEFAULT_GENERIC_DIALOGUE_CAPTION
 
 
+def test_read_aloud_removes_temp_wav_after_playback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
+    played_paths: list[Path] = []
+
+    def fake_run(command: list[str], *, check: bool) -> None:
+        assert check is True
+        temp_path = Path(command[-1])
+        assert temp_path.exists()
+        played_paths.append(temp_path)
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code != 0
+    assert len(played_paths) == 1
+    assert not played_paths[0].exists()
+
+
 def test_read_aloud_missing_turn_file_exits_with_error(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli.app, ["read-aloud", str(tmp_path / "missing.md")])
 
@@ -175,6 +203,7 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
     save_dir.mkdir()
     (save_dir / "segment-0000.wav").write_bytes(b"old-first")
     (save_dir / "segment-0001.wav").write_bytes(b"stale-second")
+    (save_dir / "segment-10000.wav").write_bytes(b"stale-large-run")
     (save_dir / "0000.wav").write_bytes(b"user-numeric-wav")
     (save_dir / "personal.wav").write_bytes(b"user-wav")
     (save_dir / "notes.txt").write_text("keep me", encoding="utf-8")
@@ -199,6 +228,7 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
     assert playback_calls == []
     assert (save_dir / "segment-0000.wav").read_bytes() == b"combined-wav"
     assert not (save_dir / "segment-0001.wav").exists()
+    assert not (save_dir / "segment-10000.wav").exists()
     assert (save_dir / "0000.wav").read_bytes() == b"user-numeric-wav"
     assert (save_dir / "personal.wav").read_bytes() == b"user-wav"
     assert (save_dir / "notes.txt").read_text(encoding="utf-8") == "keep me"
