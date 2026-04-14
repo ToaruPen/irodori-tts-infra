@@ -90,6 +90,26 @@ def test_batch_results_must_be_ordered_by_segment_index() -> None:
             total_elapsed_seconds=1.2,
         )
 
+    # Gap in the sequence (0, 2) is rejected
+    with pytest.raises(ValidationError, match="ordered"):
+        BatchSynthesisResult(
+            results=[
+                SynthesisResult(segment_index=0, wav_bytes=b"first", elapsed_seconds=0.5),
+                SynthesisResult(segment_index=2, wav_bytes=b"third", elapsed_seconds=0.9),
+            ],
+            total_elapsed_seconds=1.4,
+        )
+
+    # Non-zero start (1, 2) is rejected
+    with pytest.raises(ValidationError, match="ordered"):
+        BatchSynthesisResult(
+            results=[
+                SynthesisResult(segment_index=1, wav_bytes=b"second", elapsed_seconds=0.7),
+                SynthesisResult(segment_index=2, wav_bytes=b"third", elapsed_seconds=0.9),
+            ],
+            total_elapsed_seconds=1.6,
+        )
+
 
 def test_stream_header_serialization_reconstructs_byte_exact_chunks() -> None:
     payloads = [b"RIFF\x00\x00first-wav", b"RIFF\x00\x01second-wav"]
@@ -143,3 +163,8 @@ def test_stream_header_defaults_include_version() -> None:
     header = StreamChunkHeader(segment_index=3, byte_length=128)
     assert header.header_version == STREAM_HEADER_VERSION
     assert header.final is False
+
+
+def test_health_response_rejects_whitespace_only_detail() -> None:
+    with pytest.raises(ValidationError, match="detail"):
+        HealthResponse(status="degraded", model_loaded=False, detail="   ")

@@ -71,6 +71,15 @@ def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert PathSettings().temp_wav_dir == temp_wav_dir
 
 
+def test_valid_port_boundary_values_are_accepted() -> None:
+    min_port = 1
+    max_port = 65_535
+    assert ServerSettings(port=min_port).port == min_port
+    assert ServerSettings(port=max_port).port == max_port
+    assert ClientSettings(port=min_port).port == min_port
+    assert ClientSettings(port=max_port).port == max_port
+
+
 def test_invalid_port_values_are_rejected() -> None:
     with pytest.raises(ValidationError, match="less than or equal"):
         ServerSettings(port=65_536)
@@ -116,6 +125,10 @@ raise SystemExit(any(name in sys.modules for name in forbidden))
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(
+    shutil.which("irodori-tts") is None,
+    reason="console script not installed in this environment",
+)
 def test_console_script_help_exits_successfully() -> None:
     script = shutil.which("irodori-tts")
     assert script is not None

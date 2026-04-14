@@ -27,6 +27,7 @@ dependencies = [
   "pydantic>=2.8,<3",
   "pydantic-settings>=2.4,<3",
   "structlog>=24.4,<26",
+  "typer>=0.15,<1",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +38,6 @@ server = [
 client = [
   "httpx>=0.27,<1",
   "rich>=13.9,<15",
-  "typer>=0.15,<1",
 ]
 metrics = [
   "opentelemetry-api>=1.28,<2",
@@ -222,7 +222,6 @@ DEP002 = [
   "uvicorn",
   "httpx",
   "rich",
-  "typer",
   "opentelemetry-api",
   "opentelemetry-sdk",
   "prometheus-client",
