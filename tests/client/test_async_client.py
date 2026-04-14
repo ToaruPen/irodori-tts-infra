@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from typing_extensions import override
 
 from irodori_tts_infra.client.async_ import AsyncIrodoriClient
 from irodori_tts_infra.client.errors import (
@@ -69,6 +71,23 @@ async def _collect(chunks: AsyncIterator[bytes]) -> list[bytes]:
     return [chunk async for chunk in chunks]
 
 
+class _GatedAsyncByteStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self._gates = [asyncio.Event() for _chunk in chunks]
+        self.yielded = 0
+
+    def release(self, index: int) -> None:
+        self._gates[index].set()
+
+    @override
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for index, chunk in enumerate(self._chunks):
+            await self._gates[index].wait()
+            self.yielded += 1
+            yield chunk
+
+
 @pytest.mark.asyncio
 async def test_health_returns_contract_from_get_health() -> None:
     health = HealthResponse(status="ok", model_loaded=True, max_chunk_size=MAX_TEST_CHUNK_SIZE)
@@ -79,6 +98,17 @@ async def test_health_returns_contract_from_get_health() -> None:
         return _json_response(health)
 
     assert await _client(httpx.MockTransport(handler)).health() == health
+
+
+@pytest.mark.asyncio
+async def test_default_base_url_uses_client_settings() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == httpx.URL("http://127.0.0.1:8923/health")
+        return _json_response(HealthResponse())
+
+    client = AsyncIrodoriClient(transport=httpx.MockTransport(handler))
+
+    assert (await client.health()).status == "ok"
 
 
 @pytest.mark.asyncio
@@ -147,6 +177,34 @@ async def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_ch
     assert paths == ["/health", "/synthesize_stream"]
     assert chunks == payloads
     assert b"".join(chunks) == b"RIFF-wav"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_stream_yields_payload_before_response_completes() -> None:
+    synthesis_request = SynthesisRequest(text="長い本文です。", caption="女性が読んでいる。")
+    first_frame = (
+        StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
+        + StreamChunkHeader(segment_index=0, byte_length=2, final=False).to_bytes()
+        + b"RI"
+    )
+    final_frame = StreamChunkHeader(segment_index=1, byte_length=2, final=True).to_bytes() + b"FF"
+    stream = _GatedAsyncByteStream([first_frame, final_frame])
+    stream.release(0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        return httpx.Response(200, stream=stream)
+
+    chunks = _client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request)
+
+    first_chunk = await asyncio.wait_for(anext(chunks), timeout=0.1)
+
+    assert first_chunk == b"RI"
+    assert stream.yielded == 1
+
+    stream.release(1)
+    assert await _collect(chunks) == [b"FF"]
 
 
 @pytest.mark.asyncio

@@ -307,3 +307,24 @@ def test_sync_client_closes_owned_httpx_client() -> None:
 
     with pytest.raises(RuntimeError, match="closed"):
         client.health()
+
+
+def test_sync_client_closes_owned_httpx_client_when_stream_health_fails() -> None:
+    synthesis_request = SynthesisRequest(text="本文です。", caption="女性が読んでいる。")
+    error_payload = ErrorPayload(code="server_busy", message="server cannot accept work")
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        assert request.url.path == "/health"
+        return _json_response(error_payload, status_code=SERVER_ERROR_STATUS)
+
+    with (
+        pytest.raises(ClientUnavailableError, match="server cannot accept work"),
+        _client(httpx.MockTransport(handler)) as client,
+    ):
+        list(client.synthesize_stream(synthesis_request))
+
+    assert paths == ["/health"]
+    with pytest.raises(RuntimeError, match="closed"):
+        client.health()

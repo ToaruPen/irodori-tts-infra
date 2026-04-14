@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, NoReturn, Self, cast
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -161,7 +161,7 @@ def _handle_handshake(
     return handshake.max_chunk_size
 
 
-def _header_kind(header_line: bytes) -> object:
+def _header_kind(header_line: bytes) -> str | None:
     try:
         data = json.loads(header_line)
     except json.JSONDecodeError as exc:
@@ -169,6 +169,7 @@ def _header_kind(header_line: bytes) -> object:
         raise ClientError(message, code="protocol_error") from exc
     if not isinstance(data, dict):
         _raise_protocol_error("stream header must be a JSON object")
+    data = cast("dict[str, str | None]", data)
     return data.get("kind")
 
 
@@ -197,6 +198,6 @@ def _validate_header_version(header_version: int) -> None:
         _raise_protocol_error("unknown stream header version")
 
 
-def _raise_protocol_error(message: str) -> None:
+def _raise_protocol_error(message: str) -> NoReturn:
     error_message = f"stream protocol error: {message}"
     raise ClientError(error_message, code="protocol_error")
