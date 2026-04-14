@@ -97,3 +97,6 @@ tensorboard/
 
 # Claude Code local workflow state
 .claude/
+
+# Private TODO / investigation notes (not shared)
+docs/todo/
