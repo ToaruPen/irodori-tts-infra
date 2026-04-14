@@ -17,7 +17,7 @@ def find_characters_markdown(turn_file: Path) -> Path | None:
     current = turn_file.parent
     while current != current.parent:
         candidate = current / "characters.md"
-        if candidate.exists():
+        if candidate.is_file():
             return candidate
         if current.name == "chat":
             break
@@ -32,7 +32,7 @@ def load_voice_profile(
     generic_dialogue_caption: str = DEFAULT_GENERIC_DIALOGUE_CAPTION,
 ) -> VoiceProfile:
     characters = {}
-    if characters_md is not None and characters_md.exists():
+    if characters_md is not None and characters_md.is_file():
         characters = load_characters_markdown(characters_md.read_text(encoding="utf-8"))
 
     return VoiceProfile(

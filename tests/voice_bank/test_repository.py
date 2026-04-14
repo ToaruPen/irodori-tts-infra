@@ -74,6 +74,19 @@ def test_load_voice_profile_returns_defaults_for_missing_file(tmp_path: Path) ->
     assert profile.generic_dialogue_caption == DEFAULT_GENERIC_DIALOGUE_CAPTION
 
 
+def test_load_voice_profile_returns_defaults_for_directory_path(
+    tmp_path: Path,
+) -> None:
+    characters_dir = tmp_path / "characters.md"
+    characters_dir.mkdir()
+
+    profile = load_voice_profile(characters_dir)
+
+    assert profile.characters == {}
+    assert profile.narrator_caption == DEFAULT_NARRATOR_CAPTION
+    assert profile.generic_dialogue_caption == DEFAULT_GENERIC_DIALOGUE_CAPTION
+
+
 def test_load_voice_profile_loads_valid_characters_file(tmp_path: Path) -> None:
     characters_md = tmp_path / "characters.md"
     characters_md.write_text(
