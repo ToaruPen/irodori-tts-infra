@@ -14,6 +14,7 @@ from irodori_tts_infra.contracts import (
     ErrorPayload,
     HealthResponse,
     StreamChunkHeader,
+    StreamHandshakeHeader,
     SynthesisRequest,
     SynthesisResult,
     SynthesisSegment,
@@ -178,6 +179,42 @@ def test_stream_header_from_bytes_accepts_optional_trailing_newline() -> None:
     assert wire.endswith(b"\n")
     assert StreamChunkHeader.from_bytes(wire) == header
     assert StreamChunkHeader.from_bytes(wire.rstrip(b"\n")) == header
+
+
+def test_health_response_advertises_max_chunk_size() -> None:
+    default = HealthResponse()
+    assert default.max_chunk_size == MAX_CHUNK_SIZE_BYTES
+
+    lowered_cap = 1024
+    override = HealthResponse(max_chunk_size=lowered_cap)
+    assert override.max_chunk_size == lowered_cap
+
+    with pytest.raises(ValidationError, match="max_chunk_size"):
+        HealthResponse(max_chunk_size=MAX_CHUNK_SIZE_BYTES + 1)
+
+
+def test_stream_handshake_header_roundtrip_and_kind_discriminator() -> None:
+    lowered_cap = 1024
+    handshake = StreamHandshakeHeader(max_chunk_size=lowered_cap)
+    wire = handshake.to_bytes()
+    assert StreamHandshakeHeader.from_bytes(wire) == handshake
+
+    chunk = StreamChunkHeader(segment_index=0, byte_length=4)
+    assert chunk.kind == "chunk"
+    chunk_json = chunk.model_dump(mode="json", by_alias=True)
+    assert chunk_json["kind"] == "chunk"
+
+    handshake_json = handshake.model_dump(mode="json", by_alias=True)
+    assert handshake_json["kind"] == "handshake"
+    assert "segment_index" not in handshake_json
+    assert "byte_length" not in handshake_json
+
+
+def test_stream_handshake_header_rejects_out_of_range_max_chunk_size() -> None:
+    with pytest.raises(ValidationError, match="max_chunk_size"):
+        StreamHandshakeHeader(max_chunk_size=0)
+    with pytest.raises(ValidationError, match="max_chunk_size"):
+        StreamHandshakeHeader(max_chunk_size=MAX_CHUNK_SIZE_BYTES + 1)
 
 
 def test_voice_profile_aliases_validation() -> None:

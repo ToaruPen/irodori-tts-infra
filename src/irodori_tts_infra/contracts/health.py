@@ -4,11 +4,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from irodori_tts_infra.contracts.synthesis import MAX_CHUNK_SIZE_BYTES
+
 
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"] = "ok"
     model_loaded: bool = False
     detail: str | None = Field(default=None, min_length=1)
+    max_chunk_size: int = Field(default=MAX_CHUNK_SIZE_BYTES, ge=1, le=MAX_CHUNK_SIZE_BYTES)
 
     @field_validator("detail")
     @classmethod

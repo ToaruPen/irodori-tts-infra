@@ -73,7 +73,12 @@ MAX_CHUNK_SIZE_BYTES = 4 * 1024 * 1024
 MAX_SEGMENT_INDEX = (2**32) - 1
 
 
+def _encode_ndjson_line(payload: dict[str, object]) -> bytes:
+    return (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+
 class StreamChunkHeader(_ContractModel):
+    kind: Literal["chunk"] = "chunk"
     header_version: int = Field(
         default=STREAM_HEADER_VERSION,
         ge=1,
@@ -109,13 +114,31 @@ class StreamChunkHeader(_ContractModel):
         return round(value, 3)
 
     def to_bytes(self) -> bytes:
-        payload = self.model_dump(mode="json", by_alias=True)
-        return (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode(
-            "utf-8",
-        )
+        return _encode_ndjson_line(self.model_dump(mode="json", by_alias=True))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
         # Tolerate callers that pass the whole framed line including the trailing newline
         # as well as callers that pre-strip it; reconstruction must be deterministic either way.
+        return cls.model_validate_json(data.rstrip(b"\n"))
+
+
+class StreamHandshakeHeader(_ContractModel):
+    kind: Literal["handshake"] = "handshake"
+    header_version: int = Field(
+        default=STREAM_HEADER_VERSION,
+        ge=1,
+        serialization_alias="v",
+        validation_alias=AliasChoices("header_version", "v"),
+    )
+    max_chunk_size: int = Field(
+        ge=1,
+        le=MAX_CHUNK_SIZE_BYTES,
+    )
+
+    def to_bytes(self) -> bytes:
+        return _encode_ndjson_line(self.model_dump(mode="json", by_alias=True))
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> Self:
         return cls.model_validate_json(data.rstrip(b"\n"))
