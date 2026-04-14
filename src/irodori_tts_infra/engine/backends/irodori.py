@@ -17,7 +17,8 @@ if TYPE_CHECKING:
     from irodori_tts_infra.contracts.synthesis import SynthesisRequest
 
 INSTALL_HINT = (
-    "Install optional Irodori dependencies with: pip install 'irodori-tts-infra[irodori]'"
+    "Irodori backend requires optional dependencies. Install: "
+    "pip install irodori-tts huggingface-hub torch"
 )
 
 SaveWavFn = Callable[[str, object, int], object]
@@ -79,9 +80,7 @@ class IrodoriVoiceDesignBackend:
         self._closed = False
 
     def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
-        if self._closed:
-            msg = "backend is closed"
-            raise BackendUnavailableError(msg)
+        self._ensure_open()
 
         sampling_request = self._sampling_request_cls(
             text=request.text,
@@ -101,6 +100,7 @@ class IrodoriVoiceDesignBackend:
         return SynthesizedAudio(wav_bytes=wav_bytes, sample_rate=sample_rate)
 
     def warm_up(self) -> None:
+        self._ensure_open()
         request = self._sampling_request_cls(
             text=self._settings.warmup_text,
             caption=self._settings.warmup_caption,
@@ -116,9 +116,16 @@ class IrodoriVoiceDesignBackend:
     def close(self) -> None:
         if self._closed:
             return
-        if isinstance(self._runtime, _UnloadableRuntime):
-            self._runtime.unload()
-        self._closed = True
+        try:
+            if isinstance(self._runtime, _UnloadableRuntime):
+                self._runtime.unload()
+        finally:
+            self._closed = True
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            msg = "backend is closed"
+            raise BackendUnavailableError(msg)
 
     def _save_result_to_wav_bytes(self, audio: object, sample_rate: int) -> bytes:
         temp_dir = PathSettings().temp_wav_dir
@@ -181,7 +188,7 @@ def create_irodori_backend(
         raise
     except ImportError as exc:
         raise BackendUnavailableError(INSTALL_HINT) from exc
-    except Exception as exc:
+    except (OSError, RuntimeError) as exc:
         msg = "Failed to create Irodori backend"
         raise BackendUnavailableError(msg) from exc
 

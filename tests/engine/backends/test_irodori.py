@@ -13,6 +13,7 @@ from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
 from irodori_tts_infra.contracts.synthesis import SynthesisRequest
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.backends.irodori import (
+    INSTALL_HINT,
     IrodoriVoiceDesignBackend,
     create_irodori_backend,
 )
@@ -103,6 +104,22 @@ class FakeRuntime:
         self.unload_count += 1
 
 
+class UnloadFailingRuntime:
+    def __init__(self) -> None:
+        self.calls: list[FakeSamplingRequest] = []
+        self.unload_count = 0
+
+    def synthesize(self, request: object) -> FakeRuntimeResult:
+        assert isinstance(request, FakeSamplingRequest)
+        self.calls.append(request)
+        return FakeRuntimeResult()
+
+    def unload(self) -> None:
+        self.unload_count += 1
+        msg = "unload failed"
+        raise RuntimeError(msg)
+
+
 class RuntimeWithoutUnload:
     def __init__(self) -> None:
         self.calls: list[FakeSamplingRequest] = []
@@ -166,7 +183,7 @@ def fake_save_wav(path: str, _audio: object, _sample_rate: int) -> None:
 
 
 def make_backend(
-    runtime: FakeRuntime | RuntimeWithoutUnload | None = None,
+    runtime: FakeRuntime | RuntimeWithoutUnload | UnloadFailingRuntime | None = None,
     *,
     settings: IrodoriRuntimeSettings | None = None,
     save_wav_fn: Callable[[str, object, int], None] = fake_save_wav,
@@ -290,6 +307,27 @@ def test_close_marks_backend_unavailable() -> None:
         backend.synthesize(synthesis_request())
 
 
+def test_warm_up_after_close_raises_backend_unavailable() -> None:
+    backend = make_backend()
+
+    backend.close()
+
+    with pytest.raises(BackendUnavailableError, match="backend is closed"):
+        backend.warm_up()
+
+
+def test_close_marks_backend_closed_when_unload_raises() -> None:
+    backend = make_backend(UnloadFailingRuntime())
+
+    with pytest.raises(RuntimeError, match="unload failed"):
+        backend.close()
+
+    with pytest.raises(BackendUnavailableError, match="backend is closed"):
+        backend.synthesize(synthesis_request())
+    with pytest.raises(BackendUnavailableError, match="backend is closed"):
+        backend.warm_up()
+
+
 def test_close_calls_runtime_unload_once() -> None:
     runtime = FakeRuntime()
     backend = make_backend(runtime)
@@ -366,8 +404,15 @@ def test_factory_raises_backend_unavailable_on_missing_optional_deps() -> None:
     assert "pip install" in result.stdout or "irodori" in result.stdout.lower()
 
 
+def test_install_hint_lists_packages_without_nonexistent_extra() -> None:
+    assert "irodori-tts-infra[irodori]" not in INSTALL_HINT
+    assert "irodori-tts" in INSTALL_HINT
+    assert "huggingface-hub" in INSTALL_HINT
+    assert "torch" in INSTALL_HINT
+
+
 def test_factory_wraps_hf_download_failure() -> None:
-    error = ConnectionError("network down")
+    error = OSError("network down")
 
     def download_fn(**_kwargs: object) -> str:
         raise error
@@ -402,6 +447,25 @@ def test_factory_wraps_runtime_factory_failure() -> None:
         )
 
     assert exc_info.value.__cause__ is error
+
+
+def test_factory_does_not_wrap_runtime_factory_type_error() -> None:
+    error = TypeError("wrong runtime factory signature")
+
+    def runtime_factory(_key: object) -> FakeRuntime:
+        raise error
+
+    with pytest.raises(TypeError, match="wrong runtime factory signature") as exc_info:
+        create_irodori_backend(
+            runtime_settings(),
+            hf_hub_download_fn=lambda **_kwargs: MODEL_PATH,
+            runtime_factory=runtime_factory,
+            runtime_key_cls=FakeRuntimeKey,
+            save_wav_fn=fake_save_wav,
+            sampling_request_cls=FakeSamplingRequest,
+        )
+
+    assert exc_info.value is error
 
 
 def test_importing_irodori_backend_is_lightweight() -> None:
