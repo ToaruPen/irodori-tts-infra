@@ -38,6 +38,9 @@ class PipelineConfig:
     acquire_timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.capacity, bool) or not isinstance(self.capacity, int):
+            msg = "capacity must be an int >= 1"
+            raise TypeError(msg)
         if self.capacity < 1:
             msg = "capacity must be >= 1"
             raise ValueError(msg)

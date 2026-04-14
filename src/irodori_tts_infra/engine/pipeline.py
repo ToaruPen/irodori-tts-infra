@@ -82,8 +82,19 @@ class SynthesisPipeline:
         )
 
     def synthesize_stream(self, segments: Iterable[Segment]) -> Iterator[SynthesisResult]:
-        jobs = self._plan_segments(segments)
-        return self._iter_jobs(jobs)
+        iterator = iter(segments)
+        try:
+            first_segment = next(iterator)
+        except StopIteration as exc:
+            msg = "No segments submitted to synthesis pipeline"
+            raise EmptyBatchError(msg) from exc
+
+        def _iter() -> Iterator[SynthesisResult]:
+            yield self.synthesize_job(self.plan_segment(0, first_segment))
+            for index, segment in enumerate(iterator, start=1):
+                yield self.synthesize_job(self.plan_segment(index, segment))
+
+        return _iter()
 
     def _plan_segments(self, segments: Iterable[Segment]) -> list[SynthesisJob]:
         jobs: list[SynthesisJob] = []
@@ -93,10 +104,6 @@ class SynthesisPipeline:
             msg = "No segments submitted to synthesis pipeline"
             raise EmptyBatchError(msg)
         return jobs
-
-    def _iter_jobs(self, jobs: list[SynthesisJob]) -> Iterator[SynthesisResult]:
-        for job in jobs:
-            yield self.synthesize_job(job)
 
     def _acquire_slot(self) -> bool:
         timeout = self._config.acquire_timeout_seconds

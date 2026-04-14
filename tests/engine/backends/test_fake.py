@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from queue import Queue
 
 import pytest
 
@@ -75,18 +76,42 @@ def test_delay_is_honored_before_response() -> None:
 
 
 def test_call_recording_is_thread_safe() -> None:
-    synth = FakeSynthesizer()
-    threads = [
-        threading.Thread(target=synth.synthesize, args=(make_request(f"本文{i}"),))
-        for i in range(THREAD_COUNT)
-    ]
+    expected = [f"audio-{index}".encode() for index in range(THREAD_COUNT)]
+    synth = FakeSynthesizer(
+        responses=[
+            FakeSynthResponse(
+                audio=SynthesizedAudio(wav_bytes=wav_bytes, sample_rate=DEFAULT_SAMPLE_RATE),
+            )
+            for wav_bytes in expected
+        ],
+    )
+    barrier = threading.Barrier(THREAD_COUNT)
+    results: Queue[bytes | Exception] = Queue()
+
+    def worker(index: int) -> None:
+        try:
+            barrier.wait(timeout=1.0)
+            results.put(synth.synthesize(make_request(f"本文{index}")).wav_bytes)
+        except Exception as exc:  # noqa: BLE001
+            results.put(exc)
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(THREAD_COUNT)]
 
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(timeout=1.0)
+        assert not thread.is_alive()
+
+    collected: list[bytes] = []
+    for _ in range(THREAD_COUNT):
+        item = results.get_nowait()
+        if isinstance(item, Exception):
+            raise item
+        collected.append(item)
 
     assert len(synth.calls) == THREAD_COUNT
+    assert sorted(collected) == sorted(expected)
     assert sorted(request.text for request in synth.calls) == [
         f"本文{i}" for i in range(THREAD_COUNT)
     ]

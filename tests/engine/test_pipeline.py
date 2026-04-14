@@ -21,7 +21,7 @@ from irodori_tts_infra.text.models import Segment, SegmentKind
 from irodori_tts_infra.voice_bank import CharacterVoice, VoiceProfile, resolve_segment_caption
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from irodori_tts_infra.contracts.synthesis import SynthesisRequest, SynthesisResult
     from irodori_tts_infra.engine.protocols import Synthesizer
@@ -32,6 +32,7 @@ CONCURRENT_JOB_COUNT = 5
 EXPECTED_THIRD_INDEX = 2
 MIN_TIMEOUT_SECONDS = 0.04
 MAX_TIMEOUT_SECONDS = 0.5
+TIMING_DELAY_SECONDS = 0.01
 
 
 class BlockingSynthesizer:
@@ -131,6 +132,46 @@ def wait_for_call(fake: BlockingSynthesizer, call_index: int) -> threading.Event
     return event
 
 
+def _run_in_thread(
+    fn: Callable[[], object],
+) -> tuple[threading.Thread, Queue[object]]:
+    results: Queue[object] = Queue()
+
+    def worker() -> None:
+        try:
+            results.put(fn())
+        except BaseException as exc:  # noqa: BLE001
+            results.put(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    return thread, results
+
+
+def _join_thread(
+    thread: threading.Thread,
+    results: Queue[object],
+    *,
+    timeout: float = 1.0,
+) -> object:
+    thread.join(timeout=timeout)
+    assert not thread.is_alive()
+    item = results.get_nowait()
+    if isinstance(item, BaseException):
+        raise item
+    return item
+
+
+def _run_synthesis_job(
+    pipeline: SynthesisPipeline,
+    segment_index: int,
+) -> Callable[[], SynthesisResult]:
+    def run() -> SynthesisResult:
+        return pipeline.synthesize_job(make_job(segment_index))
+
+    return run
+
+
 def probe_available_capacity(pipeline: SynthesisPipeline) -> None:
     semaphore = pipeline._semaphore  # noqa: SLF001
     assert semaphore.acquire(blocking=False)
@@ -204,13 +245,13 @@ def test_ordering_preserves_submission_indices() -> None:
 
 def test_elapsed_timing_is_measured_for_results_and_batch() -> None:
     pipeline = make_pipeline(
-        FakeSynthesizer(responses=[FakeSynthResponse(delay_seconds=0.01)]),
+        FakeSynthesizer(responses=[FakeSynthResponse(delay_seconds=TIMING_DELAY_SECONDS)]),
     )
 
     result = pipeline.synthesize_batch([narration()])
 
-    assert result.results[0].elapsed_seconds >= 0
-    assert result.total_elapsed_seconds >= result.results[0].elapsed_seconds - 0.02
+    assert result.results[0].elapsed_seconds >= TIMING_DELAY_SECONDS
+    assert result.total_elapsed_seconds >= result.results[0].elapsed_seconds
 
 
 def test_backend_wraps_non_engine_exception() -> None:
@@ -238,17 +279,14 @@ def test_capacity_one_serializes_concurrent_jobs_event_driven() -> None:
     release_event = threading.Event()
     fake = BlockingSynthesizer(release_events=[release_event] * CONCURRENT_JOB_COUNT)
     pipeline = make_pipeline(fake)
-    threads = [
-        threading.Thread(target=pipeline.synthesize_job, args=(make_job(index),))
-        for index in range(CONCURRENT_JOB_COUNT)
+    workers = [
+        _run_in_thread(_run_synthesis_job(pipeline, index)) for index in range(CONCURRENT_JOB_COUNT)
     ]
 
-    for thread in threads:
-        thread.start()
     wait_for_call(fake, 0)
     release_event.set()
-    for thread in threads:
-        thread.join(timeout=1.0)
+    for thread, results in workers:
+        _join_thread(thread, results)
 
     assert fake.max_in_flight == 1
     assert len(fake.calls) == CONCURRENT_JOB_COUNT
@@ -277,8 +315,7 @@ def test_backpressure_timeout_zero_rejects_immediately() -> None:
     release_event = threading.Event()
     fake = BlockingSynthesizer(release_events=[release_event])
     pipeline = make_pipeline(fake, config=PipelineConfig(acquire_timeout_seconds=0))
-    holder = threading.Thread(target=pipeline.synthesize_job, args=(make_job(),))
-    holder.start()
+    holder, holder_results = _run_in_thread(lambda: pipeline.synthesize_job(make_job()))
     wait_for_call(fake, 0)
 
     try:
@@ -286,15 +323,14 @@ def test_backpressure_timeout_zero_rejects_immediately() -> None:
             pipeline.synthesize_job(make_job(1))
     finally:
         release_event.set()
-        holder.join(timeout=1.0)
+        _join_thread(holder, holder_results)
 
 
 def test_backpressure_bounded_timeout_raises_within_wide_window() -> None:
     release_event = threading.Event()
     fake = BlockingSynthesizer(release_events=[release_event])
     pipeline = make_pipeline(fake, config=PipelineConfig(acquire_timeout_seconds=0.05))
-    holder = threading.Thread(target=pipeline.synthesize_job, args=(make_job(),))
-    holder.start()
+    holder, holder_results = _run_in_thread(lambda: pipeline.synthesize_job(make_job()))
     wait_for_call(fake, 0)
 
     started = time.perf_counter()
@@ -303,7 +339,7 @@ def test_backpressure_bounded_timeout_raises_within_wide_window() -> None:
             pipeline.synthesize_job(make_job(1))
     finally:
         release_event.set()
-        holder.join(timeout=1.0)
+        _join_thread(holder, holder_results)
     elapsed = time.perf_counter() - started
 
     assert MIN_TIMEOUT_SECONDS <= elapsed <= MAX_TIMEOUT_SECONDS
@@ -339,6 +375,26 @@ def test_synthesize_stream_yields_results_in_order() -> None:
     results = list(pipeline.synthesize_stream([narration("一"), dialogue("二"), narration("三")]))
 
     assert [result.segment_index for result in results] == [0, 1, 2]
+
+
+def test_synthesize_stream_consumes_input_incrementally() -> None:
+    yielded_count = 0
+    pipeline = make_pipeline()
+
+    def segments() -> Iterator[Segment]:
+        nonlocal yielded_count
+        yielded_count += 1
+        yield narration("一")
+        yielded_count += 1
+        yield dialogue("二")
+        yielded_count += 1
+        yield narration("三")
+
+    stream = pipeline.synthesize_stream(segments())
+
+    assert yielded_count == 1
+    assert next(stream).segment_index == 0
+    assert yielded_count == 1
 
 
 def test_streaming_iterator_yields_incrementally() -> None:
@@ -448,6 +504,12 @@ def test_synthesize_job_maps_backend_audio_to_contract_result() -> None:
 
 
 def test_pipeline_config_validates_capacity_and_timeout() -> None:
+    with pytest.raises(TypeError, match="capacity must be an int >= 1"):
+        PipelineConfig(capacity=1.5)  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="capacity must be an int >= 1"):
+        PipelineConfig(capacity=True)
+
     with pytest.raises(ValueError, match="capacity must be >= 1"):
         PipelineConfig(capacity=0)
 
