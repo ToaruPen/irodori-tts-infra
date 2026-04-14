@@ -94,3 +94,6 @@ tensorboard/
 # Keep intentional test fixtures
 !tests/fixtures/**
 !tests/fixtures/audio/**
+
+# Claude Code local workflow state
+.claude/

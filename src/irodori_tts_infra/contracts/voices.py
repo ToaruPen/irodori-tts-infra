@@ -15,3 +15,21 @@ class VoiceProfileResponse(BaseModel):
             msg = "voice profile text fields must not be blank"
             raise ValueError(msg)
         return value
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: object) -> object:
+        if not isinstance(value, (list, tuple)):
+            return value
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for raw in value:
+            if not isinstance(raw, str) or not raw.strip():
+                msg = "aliases must be non-blank strings"
+                raise ValueError(msg)
+            stripped = raw.strip()
+            if stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return tuple(normalized)

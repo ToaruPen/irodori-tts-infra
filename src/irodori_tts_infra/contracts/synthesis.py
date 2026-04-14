@@ -116,4 +116,6 @@ class StreamChunkHeader(_ContractModel):
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
-        return cls.model_validate_json(data)
+        # Tolerate callers that pass the whole framed line including the trailing newline
+        # as well as callers that pre-strip it; reconstruction must be deterministic either way.
+        return cls.model_validate_json(data.rstrip(b"\n"))

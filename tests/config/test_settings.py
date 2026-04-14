@@ -103,13 +103,16 @@ import sys
 
 import irodori_tts_infra.config
 
-forbidden = [
+forbidden_prefixes = (
     "irodori_tts_infra.server",
     "irodori_tts_infra.engine",
     "irodori_tts_infra.client.sync",
+    "irodori_tts_infra.client.async_",
     "irodori_tts_infra.cache",
-]
-raise SystemExit(any(name in sys.modules for name in forbidden))
+)
+raise SystemExit(
+    any(name.startswith(forbidden_prefixes) for name in sys.modules)
+)
 """
     env = os.environ.copy()
     env["PYTHONPATH"] = "src"
@@ -125,6 +128,7 @@ raise SystemExit(any(name in sys.modules for name in forbidden))
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     shutil.which("irodori-tts") is None,
     reason="console script not installed in this environment",

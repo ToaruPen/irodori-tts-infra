@@ -20,6 +20,8 @@ from irodori_tts_infra.contracts import (
     VoiceProfileResponse,
 )
 
+pytestmark = pytest.mark.unit
+
 DEFAULT_NUM_STEPS = 30
 DEFAULT_CFG_SCALE_TEXT = 3.0
 DEFAULT_CFG_SCALE_CAPTION = 3.5
@@ -168,3 +170,23 @@ def test_stream_header_defaults_include_version() -> None:
 def test_health_response_rejects_whitespace_only_detail() -> None:
     with pytest.raises(ValidationError, match="detail"):
         HealthResponse(status="degraded", model_loaded=False, detail="   ")
+
+
+def test_stream_header_from_bytes_accepts_optional_trailing_newline() -> None:
+    header = StreamChunkHeader(segment_index=1, byte_length=32)
+    wire = header.to_bytes()
+    assert wire.endswith(b"\n")
+    assert StreamChunkHeader.from_bytes(wire) == header
+    assert StreamChunkHeader.from_bytes(wire.rstrip(b"\n")) == header
+
+
+def test_voice_profile_aliases_validation() -> None:
+    profile = VoiceProfileResponse(
+        name="Narrator",
+        caption="落ち着いた声。",
+        aliases=("Narrator-JP", "  Narrator-JP  ", "語り手"),
+    )
+    assert profile.aliases == ("Narrator-JP", "語り手")
+
+    with pytest.raises(ValidationError, match="aliases"):
+        VoiceProfileResponse(name="X", caption="Y", aliases=("   ",))
