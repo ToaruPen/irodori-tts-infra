@@ -81,7 +81,7 @@ def test_invalid_port_values_are_rejected() -> None:
 
 def test_blank_path_values_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ValidationError, match="temp_wav_dir"):
-        PathSettings(temp_wav_dir="")
+        PathSettings.model_validate({"temp_wav_dir": ""})
 
     monkeypatch.setenv("IRODORI_TTS_PATH_TEMP_WAV_DIR", "   ")
     with pytest.raises(ValidationError, match="temp_wav_dir"):
