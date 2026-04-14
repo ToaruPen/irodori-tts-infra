@@ -446,6 +446,7 @@ def test_engine_import_is_lightweight() -> None:
     code = (
         "import sys\n"
         "import irodori_tts_infra.engine\n"
+        "import irodori_tts_infra.engine.backends.irodori\n"
         'blocked = {"irodori_tts", "huggingface_hub", "torch", "fastapi", "httpx", "uvicorn"}\n'
         "loaded = blocked & set(sys.modules)\n"
         "print(loaded)\n"
