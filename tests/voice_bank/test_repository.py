@@ -49,6 +49,22 @@ def test_find_characters_markdown_walks_up_to_chat_directory(tmp_path: Path) -> 
     assert find_characters_markdown(turn_file) == characters_md
 
 
+def test_find_characters_markdown_skips_directory_and_walks_up(
+    tmp_path: Path,
+) -> None:
+    story_dir = tmp_path / "chat" / "storyA"
+    story_dir.mkdir(parents=True)
+    turn_file = story_dir / "turn.md"
+    turn_file.write_text("本文", encoding="utf-8")
+
+    (story_dir / "characters.md").mkdir()
+
+    parent_characters = tmp_path / "chat" / "characters.md"
+    parent_characters.write_text("# characters", encoding="utf-8")
+
+    assert find_characters_markdown(turn_file) == parent_characters
+
+
 def test_find_characters_markdown_returns_none_when_not_found(tmp_path: Path) -> None:
     story_dir = tmp_path / "chat" / "storyA"
     story_dir.mkdir(parents=True)
