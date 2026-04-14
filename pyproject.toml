@@ -228,6 +228,11 @@ DEP002 = [
   "irodori-tts-infra",
 ]
 
+# Vulture's default threshold flags many framework-driven Pydantic/FastAPI
+# symbols as 60%-confidence dead code; keep the check focused on higher-signal hits.
+[tool.vulture]
+min_confidence = 80
+
 # --- pytest ---
 
 [tool.pytest.ini_options]
