@@ -70,6 +70,14 @@ def _frame_stream(
     for segment in segments:
         result = pipeline.synthesize_job(_job_from_segment(segment))
         chunks = _split_wav_bytes(result.wav_bytes, max_chunk_size)
+        if not chunks:
+            yield StreamChunkHeader(
+                segment_index=segment.segment_index,
+                byte_length=0,
+                final=True,
+                elapsed_seconds=result.elapsed_seconds,
+            ).to_bytes()
+            continue
         for chunk_offset, chunk in enumerate(chunks):
             is_final = chunk_offset == len(chunks) - 1
             yield StreamChunkHeader(

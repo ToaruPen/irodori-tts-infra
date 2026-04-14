@@ -49,7 +49,7 @@ class BatchSynthesisRequest(_ContractModel):
 
 class SynthesisResult(_ContractModel):
     segment_index: int = Field(ge=0)
-    wav_bytes: bytes = Field(min_length=1)
+    wav_bytes: bytes
     elapsed_seconds: float = Field(ge=0.0)
     content_type: Literal["audio/wav"] = "audio/wav"
 

@@ -197,6 +197,7 @@ def test_synthesize_batch_rejects_unordered_segment_indices(
         )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert response.json()["detail"] == "segments must be ordered by segment_index starting at 0"
 
 
 def test_synthesize_batch_validation_error_returns_422(
@@ -271,6 +272,81 @@ def test_synthesize_stream_preserves_bytes_and_segment_order(
     assert [payload for _, payload in chunks] == [b"RIFF", b"zero", b"RIFF", b"one"]
     assert [header.final for header, _ in chunks] == [False, True, False, True]
     assert b"".join(payload for _, payload in chunks) == b"RIFFzeroRIFFone"
+
+
+def test_synthesize_stream_emits_terminal_header_for_empty_wav_bytes(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        audio=SynthesizedAudio(wav_bytes=b"", sample_rate=24_000),
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    _, chunks = _parse_stream(response.content)
+    assert len(chunks) == 1
+    header, payload = chunks[0]
+    assert header.segment_index == 0
+    assert header.byte_length == 0
+    assert header.final is True
+    assert header.elapsed_seconds >= 0.0
+    assert payload == b""
+
+
+def test_synthesize_stream_invalid_unordered_segment_index(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "segments": [
+                    {"segment_index": 1, "text": "二つ目", "caption": "声の説明。"},
+                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert response.json()["detail"] == "segments must be ordered by segment_index starting at 0"
+
+
+def test_synthesize_stream_invalid_blank_text(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "segments": [
+                    {"segment_index": 0, "text": " ", "caption": "声の説明。"},
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    _assert_validation_error_mentions(response, "text", "text fields must not be blank")
 
 
 def _parse_stream(
