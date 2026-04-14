@@ -264,7 +264,10 @@ def _import_hf_hub_download() -> HfHubDownloadFn:
         module = importlib.import_module("huggingface_hub")
     except ImportError as exc:
         raise BackendUnavailableError(INSTALL_HINT) from exc
-    return cast("HfHubDownloadFn", module.hf_hub_download)
+    return cast(  # pragma: no cover - requires real huggingface_hub
+        "HfHubDownloadFn",
+        module.hf_hub_download,
+    )
 
 
 def _import_inference_runtime() -> _InferenceRuntimeModule:
@@ -272,7 +275,10 @@ def _import_inference_runtime() -> _InferenceRuntimeModule:
         module = importlib.import_module("irodori_tts.inference_runtime")
     except ImportError as exc:
         raise BackendUnavailableError(INSTALL_HINT) from exc
-    return cast("_InferenceRuntimeModule", module)
+    return cast(  # pragma: no cover - requires real Irodori runtime
+        "_InferenceRuntimeModule",
+        module,
+    )
 
 
 def _unlink_temp_file(path: str) -> None:

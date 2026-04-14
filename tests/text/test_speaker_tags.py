@@ -27,6 +27,7 @@ def test_parse_speaker_tag_accepts_voice_direction() -> None:
     [
         "【チヅル】「おやすみなさい」",
         "【】",
+        "【   】",
         "【チヅル:】",
         "【チヅル:   】",
         "【:小声で】",

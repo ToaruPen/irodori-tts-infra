@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from textwrap import dedent
+
 import pytest
 
 from irodori_tts_infra.text import Segment, SegmentKind
@@ -54,6 +56,22 @@ def test_load_characters_markdown_captures_distinct_attribute_keys() -> None:
     characters = load_characters_markdown(content)
 
     assert characters["チヅル"].caption == "若い女性が、明るく楽しそうに話している。若々しい声。"
+
+
+def test_load_characters_markdown_emits_multiple_blocks() -> None:
+    content = dedent("""\
+        ## 名前A
+        - **年齢**: 17歳
+
+        ## 名前B
+        - **年齢**: 20歳
+    """)
+
+    result = load_characters_markdown(content)
+
+    assert set(result.keys()) == {"名前A", "名前B"}
+    assert result["名前A"].caption
+    assert result["名前B"].caption
 
 
 @pytest.mark.parametrize(

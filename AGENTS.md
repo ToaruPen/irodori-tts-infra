@@ -52,6 +52,14 @@ Lint, type checking, and tests are the source of truth.
 - Prefer small typed functions with explicit inputs and outputs.
 - Public behavior changes need tests. Bug fixes need a failing-then-passing regression test.
 
+### Coverage Tiers
+
+Two coverage thresholds are enforced in CI:
+- **Pure-logic modules** (text/, voice_bank/captions.py, voice_bank/models.py, engine/models.py, engine/protocols.py, engine/errors.py, contracts/): 100% line AND branch coverage. `__init__.py` re-exports are omitted.
+- **Overall project**: ≥ 80% (line + branch combined; branch coverage is enabled globally).
+
+Pure modules have no side effects — new branches there require corresponding tests before CI will pass. Use `# pragma: no cover` only for code paths that genuinely cannot run without external services (GPU, real Irodori runtime, network). Inline pragma comments must explain why.
+
 ## Testing
 
 Default `pytest` excludes `integration`, `gpu`, and `slow` tests.

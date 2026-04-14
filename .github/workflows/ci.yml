@@ -87,6 +87,19 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:reports/coverage.xml
 
+      - name: Combine parallel coverage data
+        run: uv run coverage combine || true
+
+      - name: Coverage gate — pure modules must be 100% (line + branch)
+        run: |
+          uv run coverage report \
+            --include="src/irodori_tts_infra/text/*.py,src/irodori_tts_infra/voice_bank/captions.py,src/irodori_tts_infra/voice_bank/models.py,src/irodori_tts_infra/engine/models.py,src/irodori_tts_infra/engine/protocols.py,src/irodori_tts_infra/engine/errors.py,src/irodori_tts_infra/contracts/*.py" \
+            --omit="*/__init__.py" \
+            --fail-under=100
+
+      - name: Coverage gate — overall project must be ≥ 80%
+        run: uv run coverage report --fail-under=80
+
   quality-gates:
     name: Quality gates
     runs-on: ubuntu-24.04
