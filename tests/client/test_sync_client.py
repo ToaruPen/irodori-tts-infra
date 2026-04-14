@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from typing_extensions import override
 
 from irodori_tts_infra.client.errors import (
     ClientBackpressureError,
@@ -25,6 +26,8 @@ from irodori_tts_infra.contracts import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pydantic import BaseModel
 
 pytestmark = pytest.mark.unit
@@ -61,6 +64,18 @@ def _framed(payloads: list[bytes], *, handshake: bool = True) -> bytes:
             )
         )
     return b"".join(frames)
+
+
+class _CountingByteStream(httpx.SyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.yielded = 0
+
+    @override
+    def __iter__(self) -> Iterator[bytes]:
+        for chunk in self._chunks:
+            self.yielded += 1
+            yield chunk
 
 
 def test_health_returns_contract_from_get_health() -> None:
@@ -132,6 +147,28 @@ def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks()
     assert paths == ["/health", "/synthesize_stream"]
     assert chunks == payloads
     assert b"".join(chunks) == b"RIFF-wav"
+
+
+def test_synthesize_stream_yields_payload_before_response_completes() -> None:
+    synthesis_request = SynthesisRequest(text="長い本文です。", caption="女性が読んでいる。")
+    first_frame = (
+        StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
+        + StreamChunkHeader(segment_index=0, byte_length=2, final=False).to_bytes()
+        + b"RI"
+    )
+    final_frame = StreamChunkHeader(segment_index=1, byte_length=2, final=True).to_bytes() + b"FF"
+    stream = _CountingByteStream([first_frame, final_frame])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        return httpx.Response(200, stream=stream)
+
+    chunks = _client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request)
+
+    assert next(chunks) == b"RI"
+    assert stream.yielded == 1
+    assert list(chunks) == [b"FF"]
 
 
 def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> None:
@@ -217,6 +254,60 @@ def test_synthesize_stream_rejects_malformed_frames(stream: bytes, match: str) -
         return httpx.Response(200, content=stream)
 
     with pytest.raises(ClientError, match=match):
+        list(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [
+        (400, ClientError),
+        (503, ClientUnavailableError),
+    ],
+)
+def test_synthesize_stream_error_responses_map_to_typed_client_errors(
+    status_code: int,
+    expected_error: type[ClientError],
+) -> None:
+    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    error_payload = ErrorPayload(
+        code="server_busy",
+        message="server cannot accept work",
+        details={"retry_after": 2},
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        return _json_response(error_payload, status_code=status_code)
+
+    with pytest.raises(expected_error, match=error_payload.message) as raised:
+        list(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
+
+    assert raised.value.status_code == status_code
+    assert raised.value.code == error_payload.code
+    assert raised.value.details == error_payload.details
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message", "expected_error"),
+    [
+        (httpx.TimeoutException, "stream timed out", ClientTimeoutError),
+        (httpx.ConnectError, "connection failed", ClientUnavailableError),
+    ],
+)
+def test_synthesize_stream_open_failures_map_to_typed_client_errors(
+    error_type: type[httpx.TimeoutException | httpx.ConnectError],
+    message: str,
+    expected_error: type[ClientError],
+) -> None:
+    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        raise error_type(message, request=request)
+
+    with pytest.raises(expected_error, match=message):
         list(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
 
 

@@ -11,11 +11,8 @@ from irodori_tts_infra.client.errors import (
 )
 from irodori_tts_infra.client.sync import (
     _default_base_url,
-    _handle_handshake,
-    _header_kind,
     _json_body,
-    _parse_chunk_header,
-    _raise_protocol_error,
+    _next_stream_payload,
 )
 from irodori_tts_infra.contracts import (
     BatchSynthesisRequest,
@@ -28,8 +25,6 @@ from irodori_tts_infra.contracts import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from types import TracebackType
-
-_StreamPayloadUpdate = tuple[bytes | None, int, bool, bool, bool, int]
 
 
 class AsyncIrodoriClient:
@@ -173,57 +168,3 @@ async def _iter_stream_payloads(
         ) = payload
         if payload_bytes is not None:
             yield payload_bytes
-
-
-def _next_stream_payload(
-    buffer: bytearray,
-    *,
-    health_max_chunk_size: int,
-    effective_max_chunk_size: int,
-    handshake_seen: bool,
-    payload_seen: bool,
-    final_seen: bool,
-    expected_index: int,
-    stream_done: bool,
-) -> _StreamPayloadUpdate | None:
-    if final_seen:
-        _raise_protocol_error("frame after final chunk")
-
-    newline_index = buffer.find(b"\n")
-    if newline_index < 0:
-        if stream_done:
-            _raise_protocol_error("missing stream header separator")
-        return None
-
-    header_line = bytes(buffer[: newline_index + 1])
-    kind = _header_kind(header_line)
-
-    if kind == "handshake":
-        effective_max_chunk_size = _handle_handshake(
-            header_line,
-            handshake_seen=handshake_seen,
-            payload_seen=payload_seen,
-            health_max_chunk_size=health_max_chunk_size,
-        )
-        del buffer[: newline_index + 1]
-        return None, effective_max_chunk_size, True, payload_seen, final_seen, expected_index
-
-    if kind != "chunk":
-        _raise_protocol_error("unknown stream header kind")
-
-    header = _parse_chunk_header(header_line)
-    if header.byte_length > effective_max_chunk_size:
-        _raise_protocol_error("chunk byte_length exceeds stream cap")
-    if header.segment_index != expected_index:
-        _raise_protocol_error("unexpected segment_index")
-
-    payload_start = newline_index + 1
-    payload_end = payload_start + header.byte_length
-    if payload_end > len(buffer):
-        if stream_done:
-            _raise_protocol_error("truncated stream payload")
-        return None
-
-    payload = bytes(buffer[payload_start:payload_end])
-    del buffer[:payload_end]
-    return payload, effective_max_chunk_size, handshake_seen, True, header.final, expected_index + 1

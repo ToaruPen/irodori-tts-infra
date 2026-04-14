@@ -271,6 +271,89 @@ async def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: s
 
 
 @pytest.mark.parametrize(
+    ("stream", "match"),
+    [
+        (b'{"kind":"chunk","v":1,"index":0,"nbytes":0,"final":true}', "separator"),
+        (b"{not-json}\n", "malformed header JSON"),
+        (b"[]\n", "JSON object"),
+        (b'{"kind":"unknown","v":1}\n', "unknown stream header kind"),
+        (b'{"v":1}\n', "unknown stream header kind"),
+        (b'{"kind":"handshake","v":1,"max_chunk_size":0}\n', "invalid handshake"),
+        (b'{"kind":"chunk","v":1,"index":0,"nbytes":-1}\n', "invalid chunk"),
+        (b'{"kind":"chunk","v":2,"index":0,"nbytes":0}\n', "unknown stream header version"),
+        (b'{"kind":"chunk","v":1,"index":0,"nbytes":4}\nab', "truncated"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_synthesize_stream_rejects_malformed_frames(stream: bytes, match: str) -> None:
+    synthesis_request = SynthesisRequest(text="壊れたフレームです。", caption="女性が読んでいる。")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        return httpx.Response(200, content=stream)
+
+    with pytest.raises(ClientError, match=match):
+        await _collect(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [
+        (400, ClientError),
+        (503, ClientUnavailableError),
+    ],
+)
+@pytest.mark.asyncio
+async def test_synthesize_stream_error_responses_map_to_typed_client_errors(
+    status_code: int,
+    expected_error: type[ClientError],
+) -> None:
+    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    error_payload = ErrorPayload(
+        code="server_busy",
+        message="server cannot accept work",
+        details={"retry_after": 2},
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        return _json_response(error_payload, status_code=status_code)
+
+    with pytest.raises(expected_error, match=error_payload.message) as raised:
+        await _collect(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
+
+    assert raised.value.status_code == status_code
+    assert raised.value.code == error_payload.code
+    assert raised.value.details == error_payload.details
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message", "expected_error"),
+    [
+        (httpx.TimeoutException, "stream timed out", ClientTimeoutError),
+        (httpx.ConnectError, "connection failed", ClientUnavailableError),
+    ],
+)
+@pytest.mark.asyncio
+async def test_synthesize_stream_open_failures_map_to_typed_client_errors(
+    error_type: type[httpx.TimeoutException | httpx.ConnectError],
+    message: str,
+    expected_error: type[ClientError],
+) -> None:
+    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return _json_response(HealthResponse(max_chunk_size=MAX_TEST_CHUNK_SIZE))
+        raise error_type(message, request=request)
+
+    with pytest.raises(expected_error, match=message):
+        await _collect(_client(httpx.MockTransport(handler)).synthesize_stream(synthesis_request))
+
+
+@pytest.mark.parametrize(
     ("status_code", "expected_error"),
     [
         (400, ClientError),
