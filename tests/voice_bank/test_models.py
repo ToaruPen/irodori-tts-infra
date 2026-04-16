@@ -44,6 +44,19 @@ def test_rvc_profile_state_prototypes_defaults_to_empty_mapping() -> None:
     assert profile.state_prototypes == {}
 
 
+def test_rvc_profile_normalizes_path_values() -> None:
+    profile = RVCProfile(
+        model_path="models/chizuru.pth",  # type: ignore[arg-type]
+        sample_rate=40000,
+        neutral_prototype="prototypes/chizuru-neutral.npy",  # type: ignore[arg-type]
+        state_prototypes={"happy": "prototypes/chizuru-happy.npy"},  # type: ignore[dict-item]
+    )
+
+    assert profile.model_path == Path("models/chizuru.pth")
+    assert profile.neutral_prototype == Path("prototypes/chizuru-neutral.npy")
+    assert profile.state_prototypes == {"happy": Path("prototypes/chizuru-happy.npy")}
+
+
 def test_rvc_profile_state_prototypes_is_immutable_snapshot() -> None:
     state_prototypes = {"happy": Path("prototypes/chizuru-happy.npy")}
 

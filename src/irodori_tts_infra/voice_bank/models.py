@@ -18,13 +18,18 @@ class RVCProfile:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "model_path", Path(self.model_path))
+        if self.neutral_prototype is not None:
+            object.__setattr__(self, "neutral_prototype", Path(self.neutral_prototype))
         if self.sample_rate <= 0:
             msg = "sample_rate must be greater than 0"
             raise ValueError(msg)
+        state_prototypes = {
+            state: Path(prototype) for state, prototype in self.state_prototypes.items()
+        }
         object.__setattr__(
             self,
             "state_prototypes",
-            MappingProxyType(dict(self.state_prototypes)),
+            MappingProxyType(state_prototypes),
         )
 
 

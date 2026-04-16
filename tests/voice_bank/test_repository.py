@@ -239,3 +239,94 @@ sample_rate = 40000
         match=r"RVC manifest contains characters not present in characters\.md: いない",
     ):
         load_voice_profile(characters_md, rvc_manifest=manifest)
+
+
+def test_load_voice_profile_rejects_absolute_rvc_model_path(tmp_path: Path) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_rvc.toml"
+    manifest.write_text(
+        f"""
+[characters."チヅル"]
+model_path = "{tmp_path / "models/chizuru.pth"}"
+sample_rate = 40000
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="manifest path values must be relative paths"):
+        load_voice_profile(characters_md, rvc_manifest=manifest)
+
+
+@pytest.mark.parametrize(
+    ("field_line", "match"),
+    [
+        ('sample_rate = "40000"', r"characters\.チヅル\.sample_rate must be an integer"),
+        ("sample_rate = true", r"characters\.チヅル\.sample_rate must be an integer"),
+    ],
+)
+def test_load_voice_profile_rejects_invalid_rvc_sample_rate_type(
+    tmp_path: Path,
+    field_line: str,
+    match: str,
+) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_rvc.toml"
+    manifest.write_text(
+        f"""
+[characters."チヅル"]
+model_path = "models/chizuru.pth"
+{field_line}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError, match=match):
+        load_voice_profile(characters_md, rvc_manifest=manifest)
+
+
+def test_load_voice_profile_rejects_invalid_rvc_neutral_prototype_type(
+    tmp_path: Path,
+) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_rvc.toml"
+    manifest.write_text(
+        """
+[characters."チヅル"]
+model_path = "models/chizuru.pth"
+sample_rate = 40000
+neutral_prototype = 123
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=r"characters\.チヅル\.neutral_prototype must be a string",
+    ):
+        load_voice_profile(characters_md, rvc_manifest=manifest)
+
+
+def test_load_voice_profile_rejects_invalid_rvc_state_prototypes_type(
+    tmp_path: Path,
+) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_rvc.toml"
+    manifest.write_text(
+        """
+[characters."チヅル"]
+model_path = "models/chizuru.pth"
+sample_rate = 40000
+state_prototypes = "prototypes/chizuru-happy.npy"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=r"characters\.チヅル\.state_prototypes must be a TOML table",
+    ):
+        load_voice_profile(characters_md, rvc_manifest=manifest)

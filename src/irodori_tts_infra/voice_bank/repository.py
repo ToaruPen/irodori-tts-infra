@@ -15,6 +15,7 @@ from characters.md are rejected by load_voice_profile.
 from __future__ import annotations
 
 import tomllib
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from irodori_tts_infra.voice_bank.captions import (
@@ -26,7 +27,6 @@ from irodori_tts_infra.voice_bank.models import CharacterVoice, RVCProfile, Voic
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
 RVC_MANIFEST_FILENAME = "voice_bank_rvc.toml"
 
@@ -179,7 +179,11 @@ def _string_value(value: object, context: str) -> str:
 
 
 def _resolve_manifest_path(value: str, *, base_dir: Path) -> Path:
-    return base_dir / value
+    path = Path(value)
+    if path.is_absolute():
+        msg = "manifest path values must be relative paths"
+        raise ValueError(msg)
+    return base_dir / path
 
 
 def _as_table(value: object, context: str) -> Mapping[str, object]:
