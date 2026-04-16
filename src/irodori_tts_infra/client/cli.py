@@ -7,7 +7,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
-import click
 import typer
 from rich.progress import Progress
 
@@ -136,7 +135,8 @@ def read_aloud(
 
             _play_audio_segments(audio_segments, _player_command_parts(player_command))
     except ClientError as exc:
-        raise click.ClickException(exc.message) from exc
+        typer.echo(f"Error: {exc.message}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def _load_profile(
