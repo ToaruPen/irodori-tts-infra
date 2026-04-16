@@ -80,12 +80,14 @@ Negative:
 
 Follow-up work:
 
-- Integrate the Windows install examples from the implementation notes into the
-  deploy scripts and operator docs: `uv pip install
-  "irodori-tts-infra[server,irodori] @ ./path/to/source"` for local checkouts
-  and `uv pip install "irodori-tts-infra[server,irodori] @
-  git+https://github.com/ToaruPen/irodori-tts-infra.git@<commit-hash>"` for
-  pinned Git sources.
+- Integrate the two-step Windows install examples from the implementation notes
+  into the deploy scripts and operator docs: first **Install Infra** with
+  `uv pip install "irodori-tts-infra[server,irodori] @ ./path/to/source"` or
+  `uv pip install "irodori-tts-infra[server,irodori] @
+  git+https://github.com/ToaruPen/irodori-tts-infra.git@<commit-hash>"`; then
+  **Install Irodori-TTS** with `uv pip install "irodori-tts @
+  ./path/to/irodori-tts"` or `uv pip install "irodori-tts @
+  git+https://github.com/<owner>/Irodori-TTS.git@<commit-hash>"`.
 - Remove stale `IRODORI_TTS_DIR` guidance from prototype-era docs and examples
   after deploy scripts are updated.
 - Make the production server entrypoint construct the real Irodori backend in
@@ -114,16 +116,20 @@ Test discovery and execution:
 
 The smoke test must fail unless all of these assertions pass:
 
-- `import irodori_tts.inference_runtime` succeeds from the installed package.
-  Any `ImportError` or missing optional runtime dependency is a failed smoke
-  test and must map to `BackendUnavailableError` at the adapter boundary.
+- Raw import check: `import irodori_tts.inference_runtime` succeeds from the
+  installed package. If the raw module check fails, the smoke test observes the
+  failure as `ImportError` or `ModuleNotFoundError` and fails immediately.
+- Adapter/factory contract check: when the backend adapter or factory initializes
+  with a missing runtime, missing optional dependency, or raw `ImportError`, the
+  surfaced exception is `BackendUnavailableError`; raw import exceptions must not
+  leak through the adapter/factory boundary.
 - Backend construction and warmup complete within 60 seconds. A warmup timeout
   beyond 60 seconds, checkpoint download failure, or runtime construction
   failure is a failed smoke test and must map to `BackendUnavailableError`.
-- Backend exceptions raised during import, warmup, or a single synthetic request
-  are translated to `BackendUnavailableError`. Leaking raw Irodori, PyTorch,
-  Hugging Face, or CUDA exceptions through the server boundary is a failed smoke
-  test.
+- Backend exceptions raised through the adapter/factory during warmup or a
+  single synthetic request are translated to `BackendUnavailableError`. Leaking
+  raw Irodori, PyTorch, Hugging Face, or CUDA exceptions through the server
+  boundary is a failed smoke test.
 - During Irodori and RVC coexistence, the server process uses no more than
   10240 MiB of GPU memory on the RTX 4070 12GB host.
 
@@ -182,14 +188,17 @@ adds a second environment to bootstrap, pin, monitor, and warm.
 - Do not use `IRODORI_TTS_DIR` for runtime imports. Runtime configuration should
   continue to use `IRODORI_TTS_RUNTIME_*` for model checkpoint, devices,
   precision, warmup, decode mode, and compile settings.
-- Windows deployment should install this package with PEP 508 extras syntax,
-  then install Irodori-TTS into the same uv environment from a pinned source
-  until the optional dependency can encode that source directly. For a local
-  checkout, use `uv pip install "irodori-tts-infra[server,irodori] @
-  ./path/to/source"`. For a Git source, use `uv pip install
+- Windows deployment should install two packages into the same uv environment:
+  **Install Infra** with PEP 508 extras syntax, then **Install Irodori-TTS** from
+  a pinned source until the optional dependency can encode that source directly.
+  For local checkouts, use `uv pip install "irodori-tts-infra[server,irodori] @
+  ./path/to/source"` and `uv pip install "irodori-tts @
+  ./path/to/irodori-tts"`. For Git sources, use `uv pip install
   "irodori-tts-infra[server,irodori] @
-  git+https://github.com/ToaruPen/irodori-tts-infra.git@<commit-hash>"`, with
-  the commit hash pinned in the URL.
+  git+https://github.com/ToaruPen/irodori-tts-infra.git@<commit-hash>"` and
+  `uv pip install "irodori-tts @
+  git+https://github.com/<owner>/Irodori-TTS.git@<commit-hash>"`, with both
+  commit hashes pinned in the URLs.
 - `CLAUDE.md` in this repository is currently a symlink to `AGENTS.md`; the
   referenced `CLAUDE.md:32-36` guidance belongs to the prototype history. Any
   surviving prototype instructions that mention `sys.path` or `IRODORI_TTS_DIR`
