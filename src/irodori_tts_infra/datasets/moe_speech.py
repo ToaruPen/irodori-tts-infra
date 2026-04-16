@@ -5,12 +5,12 @@ import sys
 import wave
 from array import array
 from dataclasses import dataclass
-from importlib import import_module
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from huggingface_hub import hf_hub_download, list_repo_tree
 
 from irodori_tts_infra.datasets.models import ExtractedClip, ExtractionIndex
 
@@ -293,6 +293,4 @@ def _entry_path(entry: object) -> str:
 
 def _load_huggingface_helpers() -> tuple[Callable[..., Any], Callable[..., str]]:
     # Future JEV2 fallback should plug in here with the same record-yielding contract.
-    huggingface_hub = import_module("huggingface_hub")
-
-    return huggingface_hub.list_repo_tree, huggingface_hub.hf_hub_download
+    return list_repo_tree, hf_hub_download
