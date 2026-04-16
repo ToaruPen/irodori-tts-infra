@@ -297,6 +297,39 @@ model_path = "models/chizuru.pth"
         load_voice_profile(characters_md, rvc_manifest=manifest)
 
 
+@pytest.mark.parametrize(
+    ("manifest_content", "match"),
+    [
+        (
+            """
+[characters."チヅル"]
+sample_rate = 40000
+""",
+            r"characters\.チヅル\.model_path is required",
+        ),
+        (
+            """
+[characters."チヅル"]
+model_path = "models/chizuru.pth"
+""",
+            r"characters\.チヅル\.sample_rate is required",
+        ),
+    ],
+)
+def test_load_voice_profile_rejects_missing_required_rvc_fields(
+    tmp_path: Path,
+    manifest_content: str,
+    match: str,
+) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_rvc.toml"
+    manifest.write_text(manifest_content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=match):
+        load_voice_profile(characters_md, rvc_manifest=manifest)
+
+
 def test_load_voice_profile_rejects_invalid_rvc_neutral_prototype_type(
     tmp_path: Path,
 ) -> None:

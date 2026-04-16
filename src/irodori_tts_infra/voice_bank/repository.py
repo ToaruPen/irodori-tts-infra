@@ -165,6 +165,9 @@ def _required_path(
 
 def _required_int(table: Mapping[str, object], key: str, context: str) -> int:
     value = table.get(key)
+    if value is None:
+        msg = f"{context}.{key} is required"
+        raise ValueError(msg)
     if not isinstance(value, int) or isinstance(value, bool):
         msg = f"{context}.{key} must be an integer"
         raise TypeError(msg)
@@ -172,6 +175,9 @@ def _required_int(table: Mapping[str, object], key: str, context: str) -> int:
 
 
 def _string_value(value: object, context: str) -> str:
+    if value is None:
+        msg = f"{context} is required"
+        raise ValueError(msg)
     if not isinstance(value, str):
         msg = f"{context} must be a string"
         raise TypeError(msg)
