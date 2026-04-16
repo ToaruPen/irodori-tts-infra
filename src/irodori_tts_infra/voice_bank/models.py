@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -8,9 +10,29 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
+class RVCProfile:
+    model_path: Path
+    sample_rate: int
+    neutral_prototype: Path | None = None
+    state_prototypes: Mapping[str, Path] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "model_path", Path(self.model_path))
+        if self.sample_rate <= 0:
+            msg = "sample_rate must be greater than 0"
+            raise ValueError(msg)
+        object.__setattr__(
+            self,
+            "state_prototypes",
+            MappingProxyType(dict(self.state_prototypes)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CharacterVoice:
     name: str
     caption: str
+    rvc: RVCProfile | None = None
 
 
 @dataclass(frozen=True, slots=True)
