@@ -1,6 +1,6 @@
 # 0001: Irodori Runtime Access Pattern
 
-Date: 2026-04-17
+Date: 2026-04-16
 
 Status: Accepted
 
@@ -89,6 +89,23 @@ Follow-up work:
   scheduling policy and documented VRAM budget.
 - Add a GPU smoke test path that proves Irodori package import, backend warmup,
   and later Irodori-to-RVC coexistence on the Windows host.
+  This follows the repository testing policy that GPU tests require CUDA/GPU or
+  the real Irodori runtime and are excluded from default `pytest`. The smoke
+  test must fail unless all of these assertions pass:
+  - `import irodori_tts.inference_runtime` succeeds from the installed package;
+    any `ImportError` or missing optional runtime dependency is a failed smoke
+    test and must map to `BackendUnavailableError` at the adapter boundary.
+  - Backend construction and warmup complete before the configured warmup
+    timeout; timeout, checkpoint download failure, and runtime construction
+    failure are failed smoke tests and must map to `BackendUnavailableError`.
+  - During Irodori and RVC coexistence, the server process uses no more than
+    10240 MiB of GPU memory on the RTX 4070 12GB host, measured by summing the
+    process rows from `nvidia-smi --query-compute-apps=pid,used_memory
+    --format=csv,noheader,nounits` after both runtimes are loaded and warmed.
+  - Backend exceptions raised during warmup or a single synthetic request are
+    translated to `BackendUnavailableError`; leaking raw Irodori, PyTorch,
+    Hugging Face, or CUDA exceptions through the server boundary is a failed
+    smoke test.
 
 ## Alternatives Considered
 
@@ -127,9 +144,14 @@ adds a second environment to bootstrap, pin, monitor, and warm.
 - Do not use `IRODORI_TTS_DIR` for runtime imports. Runtime configuration should
   continue to use `IRODORI_TTS_RUNTIME_*` for model checkpoint, devices,
   precision, warmup, decode mode, and compile settings.
-- Windows deployment should install this package with `--extra server --extra
-  irodori`, then install Irodori-TTS into the same uv environment from a pinned
-  source until the optional dependency can encode that source directly.
+- Windows deployment should install this package with PEP 508 extras syntax,
+  then install Irodori-TTS into the same uv environment from a pinned source
+  until the optional dependency can encode that source directly. For a local
+  checkout, use `uv pip install "irodori-tts-infra[server,irodori] @
+  ./path/to/source"`. For a Git source, use `uv pip install
+  "irodori-tts-infra[server,irodori] @
+  git+https://github.com/ToaruPen/irodori-tts-infra.git@<commit-hash>"`, with
+  the commit hash pinned in the URL.
 - `CLAUDE.md` in this repository is currently a symlink to `AGENTS.md`; the
   referenced `CLAUDE.md:32-36` guidance belongs to the prototype history. Any
   surviving prototype instructions that mention `sys.path` or `IRODORI_TTS_DIR`
