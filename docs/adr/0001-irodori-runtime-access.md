@@ -80,32 +80,70 @@ Negative:
 
 Follow-up work:
 
-- Define the exact Windows install command and pinning policy for Irodori-TTS.
+- Integrate the Windows install examples from the implementation notes into the
+  deploy scripts and operator docs: `uv pip install
+  "irodori-tts-infra[server,irodori] @ ./path/to/source"` for local checkouts
+  and `uv pip install "irodori-tts-infra[server,irodori] @
+  git+https://github.com/ToaruPen/irodori-tts-infra.git@<commit-hash>"` for
+  pinned Git sources.
 - Remove stale `IRODORI_TTS_DIR` guidance from prototype-era docs and examples
   after deploy scripts are updated.
 - Make the production server entrypoint construct the real Irodori backend in
   lifespan and surface `BackendUnavailableError` cleanly.
 - Add Phase 2 RVC loading so both runtimes use the same capacity-one GPU
   scheduling policy and documented VRAM budget.
-- Add a GPU smoke test path that proves Irodori package import, backend warmup,
-  and later Irodori-to-RVC coexistence on the Windows host.
-  This follows the repository testing policy that GPU tests require CUDA/GPU or
-  the real Irodori runtime and are excluded from default `pytest`. The smoke
-  test must fail unless all of these assertions pass:
-  - `import irodori_tts.inference_runtime` succeeds from the installed package;
-    any `ImportError` or missing optional runtime dependency is a failed smoke
-    test and must map to `BackendUnavailableError` at the adapter boundary.
-  - Backend construction and warmup complete before the configured warmup
-    timeout; timeout, checkpoint download failure, and runtime construction
-    failure are failed smoke tests and must map to `BackendUnavailableError`.
-  - During Irodori and RVC coexistence, the server process uses no more than
-    10240 MiB of GPU memory on the RTX 4070 12GB host, measured by summing the
-    process rows from `nvidia-smi --query-compute-apps=pid,used_memory
-    --format=csv,noheader,nounits` after both runtimes are loaded and warmed.
-  - Backend exceptions raised during warmup or a single synthetic request are
-    translated to `BackendUnavailableError`; leaking raw Irodori, PyTorch,
-    Hugging Face, or CUDA exceptions through the server boundary is a failed
-    smoke test.
+- Add the GPU smoke-test implementation described below.
+
+## GPU Smoke Test Acceptance
+
+This follows the repository testing policy that GPU tests require CUDA/GPU or
+the real Irodori runtime and are excluded from default `pytest`.
+
+Test discovery and execution:
+
+- Place the first smoke test in `tests/smoke/test_irodori_gpu_smoke.py`.
+- Register and mark it with `@pytest.mark.gpu_smoke`. Also mark it with the
+  existing `@pytest.mark.gpu` marker so the default local test selection still
+  excludes it.
+- Run it on the Windows GPU host with `uv run pytest -m gpu_smoke tests/smoke/`;
+  the raw pytest equivalent is `pytest -m gpu_smoke tests/smoke/`.
+- On hosts without CUDA, skip at collection or fixture setup with
+  `@pytest.mark.skipif(not has_cuda(), reason="CUDA GPU required")` or an
+  equivalent fixture-level `pytest.skip`. Do not xfail GPU-less hosts because a
+  missing GPU is an environment mismatch, not an expected product failure.
+
+The smoke test must fail unless all of these assertions pass:
+
+- `import irodori_tts.inference_runtime` succeeds from the installed package.
+  Any `ImportError` or missing optional runtime dependency is a failed smoke
+  test and must map to `BackendUnavailableError` at the adapter boundary.
+- Backend construction and warmup complete within 60 seconds. A warmup timeout
+  beyond 60 seconds, checkpoint download failure, or runtime construction
+  failure is a failed smoke test and must map to `BackendUnavailableError`.
+- Backend exceptions raised during import, warmup, or a single synthetic request
+  are translated to `BackendUnavailableError`. Leaking raw Irodori, PyTorch,
+  Hugging Face, or CUDA exceptions through the server boundary is a failed smoke
+  test.
+- During Irodori and RVC coexistence, the server process uses no more than
+  10240 MiB of GPU memory on the RTX 4070 12GB host.
+
+VRAM measurement procedure:
+
+- Measure the server PID with `nvidia-smi
+  --query-compute-apps=pid,used_memory --format=csv,noheader,nounits` after
+  Irodori warmup and again after RVC warmup in the same process.
+- Record the real host output in the smoke-test log. Example passing evidence
+  shape, not a checked-in baseline:
+  - after Irodori warmup: `4242, 5900`
+  - after Irodori plus RVC warmup: `4242, 9700`
+- The threshold is `10240 MiB` because the Phase 2 budget reserves up to
+  `6144 MiB` for Irodori and up to `4096 MiB` for RVC in the server process.
+  On a 12GB RTX 4070, treated as `12288 MiB`, that leaves `2048 MiB` outside the
+  process for Windows display use, driver/CUDA allocator overhead, transient
+  buffers, and observability tools.
+- A looser `11000 MiB` threshold would leave only `1288 MiB` of headroom. Reject
+  that for the first Phase 2 smoke test; revisit it only after repeated real
+  host measurements show stable memory pressure below the current limit.
 
 ## Alternatives Considered
 
