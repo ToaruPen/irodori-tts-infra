@@ -20,6 +20,9 @@ class RVCProfile:
         object.__setattr__(self, "model_path", Path(self.model_path))
         if self.neutral_prototype is not None:
             object.__setattr__(self, "neutral_prototype", Path(self.neutral_prototype))
+        if not isinstance(self.sample_rate, int) or isinstance(self.sample_rate, bool):
+            msg = "sample_rate must be an integer"
+            raise TypeError(msg)
         if self.sample_rate <= 0:
             msg = "sample_rate must be greater than 0"
             raise ValueError(msg)

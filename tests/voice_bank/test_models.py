@@ -80,6 +80,15 @@ def test_rvc_profile_rejects_non_positive_sample_rate(sample_rate: int) -> None:
         RVCProfile(model_path=Path("models/chizuru.pth"), sample_rate=sample_rate)
 
 
+@pytest.mark.parametrize("sample_rate", [True, 40000.5])
+def test_rvc_profile_rejects_non_integer_sample_rate(sample_rate: object) -> None:
+    with pytest.raises(TypeError, match="sample_rate must be an integer"):
+        RVCProfile(
+            model_path=Path("models/chizuru.pth"),
+            sample_rate=sample_rate,  # type: ignore[arg-type]
+        )
+
+
 def test_character_voice_defaults_to_no_rvc_profile() -> None:
     character = CharacterVoice(name="チヅル", caption="チヅルの声。")
 

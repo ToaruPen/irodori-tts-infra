@@ -15,7 +15,7 @@ from characters.md are rejected by load_voice_profile.
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, cast
 
 from irodori_tts_infra.voice_bank.captions import (
@@ -180,7 +180,11 @@ def _string_value(value: object, context: str) -> str:
 
 def _resolve_manifest_path(value: str, *, base_dir: Path) -> Path:
     path = Path(value)
-    if path.is_absolute():
+    if (
+        path.is_absolute()
+        or PurePosixPath(value).is_absolute()
+        or PureWindowsPath(value).is_absolute()
+    ):
         msg = "manifest path values must be relative paths"
         raise ValueError(msg)
     return base_dir / path

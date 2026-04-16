@@ -241,14 +241,25 @@ sample_rate = 40000
         load_voice_profile(characters_md, rvc_manifest=manifest)
 
 
-def test_load_voice_profile_rejects_absolute_rvc_model_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "model_path",
+    [
+        "/models/chizuru.pth",
+        "C:/models/chizuru.pth",
+        r"C:\models\chizuru.pth",
+    ],
+)
+def test_load_voice_profile_rejects_absolute_rvc_model_path(
+    tmp_path: Path,
+    model_path: str,
+) -> None:
     characters_md = tmp_path / "characters.md"
     characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
     manifest = tmp_path / "voice_bank_rvc.toml"
     manifest.write_text(
         f"""
 [characters."チヅル"]
-model_path = "{tmp_path / "models/chizuru.pth"}"
+model_path = '{model_path}'
 sample_rate = 40000
 """,
         encoding="utf-8",
