@@ -98,8 +98,8 @@ Follow-up work:
 
 ## GPU Smoke Test Acceptance
 
-This follows the repository testing policy that GPU tests require CUDA/GPU or
-the real Irodori runtime and are excluded from default `pytest`.
+This follows the repository testing policy that GPU tests require both CUDA/GPU
+and the real Irodori runtime and are excluded from default `pytest`.
 
 Test discovery and execution:
 
@@ -109,10 +109,12 @@ Test discovery and execution:
   excludes it.
 - Run it on the Windows GPU host with `uv run pytest -m gpu_smoke tests/smoke/`;
   the raw pytest equivalent is `pytest -m gpu_smoke tests/smoke/`.
-- On hosts without CUDA, skip at collection or fixture setup with
-  `@pytest.mark.skipif(not has_cuda(), reason="CUDA GPU required")` or an
-  equivalent fixture-level `pytest.skip`. Do not xfail GPU-less hosts because a
-  missing GPU is an environment mismatch, not an expected product failure.
+- On hosts without CUDA or without the configured real Irodori runtime, skip at
+  collection or fixture setup with
+  `@pytest.mark.skipif(not has_cuda(), reason="CUDA GPU and real Irodori runtime required")`
+  or an equivalent fixture-level `pytest.skip`. Do not xfail those hosts because
+  missing GPU/runtime prerequisites are environment mismatches, not expected
+  product failures.
 
 The smoke test must fail unless all of these assertions pass:
 
@@ -123,9 +125,16 @@ The smoke test must fail unless all of these assertions pass:
   with a missing runtime, missing optional dependency, or raw `ImportError`, the
   surfaced exception is `BackendUnavailableError`; raw import exceptions must not
   leak through the adapter/factory boundary.
-- Backend construction and warmup complete within 60 seconds. A warmup timeout
-  beyond 60 seconds, checkpoint download failure, or runtime construction
-  failure is a failed smoke test and must map to `BackendUnavailableError`.
+- Precondition: required Irodori model checkpoints are already present in the
+  host cache before running the smoke test. First-time checkpoint download is
+  setup work and is not part of the timed warmup phase.
+- With pre-cached checkpoints, backend construction and warmup complete within
+  60 seconds. A warmup timeout beyond 60 seconds or runtime construction failure
+  is a failed smoke test and must map to `BackendUnavailableError`.
+- If checkpoint cache validation or checkpoint restore fails before the timed
+  warmup, the smoke test fails as an environment setup failure; when that failure
+  is observed through the adapter/factory boundary, it must surface as
+  `BackendUnavailableError`.
 - Backend exceptions raised through the adapter/factory during warmup or a
   single synthetic request are translated to `BackendUnavailableError`. Leaking
   raw Irodori, PyTorch, Hugging Face, or CUDA exceptions through the server
