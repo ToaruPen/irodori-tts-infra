@@ -7,10 +7,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
+import click
 import typer
 from rich.progress import Progress
 
 from irodori_tts_infra import __version__
+from irodori_tts_infra.client.errors import ClientError
 from irodori_tts_infra.client.sync import SyncIrodoriClient
 from irodori_tts_infra.config import ClientSettings
 from irodori_tts_infra.contracts import SynthesisRequest
@@ -124,14 +126,17 @@ def read_aloud(
         narrator_caption=narrator_caption,
     )
     base_url = _base_url_from_remote_host(remote_host)
-    with SyncIrodoriClient(base_url=base_url) as client:
-        audio_segments = _synthesize_audio_segments(client, segments, profile)
-        if save_dir is not None:
-            saved = _save_audio_segments(audio_segments, save_dir)
-            typer.echo(f"Saved {saved} WAV file(s) to {save_dir}")
-            return
+    try:
+        with SyncIrodoriClient(base_url=base_url) as client:
+            audio_segments = _synthesize_audio_segments(client, segments, profile)
+            if save_dir is not None:
+                saved = _save_audio_segments(audio_segments, save_dir)
+                typer.echo(f"Saved {saved} WAV file(s) to {save_dir}")
+                return
 
-        _play_audio_segments(audio_segments, _player_command_parts(player_command))
+            _play_audio_segments(audio_segments, _player_command_parts(player_command))
+    except ClientError as exc:
+        raise click.ClickException(exc.message) from exc
 
 
 def _load_profile(

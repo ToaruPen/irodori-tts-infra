@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import pytest
 from typer.testing import CliRunner
+from typing_extensions import override
 
 from irodori_tts_infra.client import cli
+from irodori_tts_infra.client.errors import ClientUnavailableError
 from irodori_tts_infra.voice_bank import (
     DEFAULT_GENERIC_DIALOGUE_CAPTION,
     DEFAULT_NARRATOR_CAPTION,
@@ -47,6 +49,14 @@ class FakeSyncIrodoriClient:
         self.requests.append(request)
         self.events.append(("synthesize", request.text))
         yield from self.wav_chunks_by_text[request.text]
+
+
+class FailingSyncIrodoriClient(FakeSyncIrodoriClient):
+    @override
+    def synthesize_stream(self, request: SynthesisRequest) -> Iterator[bytes]:
+        self.requests.append(request)
+        message = "connection failed"
+        raise ClientUnavailableError(message, endpoint="/synthesize_stream")
 
 
 def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
@@ -138,6 +148,21 @@ def test_read_aloud_missing_turn_file_exits_with_error(tmp_path: Path) -> None:
     assert "does not exist" in result.output
 
 
+def test_read_aloud_synthesis_failure_exits_with_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+    FailingSyncIrodoriClient.instances = []
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FailingSyncIrodoriClient)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code != 0
+    assert "connection failed" in result.output
+
+
 def test_read_aloud_uses_default_profile_without_characters_markdown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -191,6 +216,56 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
 
     assert result.exit_code == 0, result.output
     assert FakeSyncIrodoriClient.instances[0].base_url == "http://100.112.161.83:8923"
+
+
+def test_read_aloud_remote_host_with_explicit_port_skips_default_port(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+
+    def fake_run(_command: list[str], *, check: bool) -> None:
+        assert check is True
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["read-aloud", str(turn_file), "--remote-host", "example.com:9000"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeSyncIrodoriClient.instances[0].base_url == "http://example.com:9000"
+
+
+def test_read_aloud_remote_host_with_https_prefix_preserves_scheme(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+
+    def fake_run(_command: list[str], *, check: bool) -> None:
+        assert check is True
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["read-aloud", str(turn_file), "--remote-host", "https://api.example.com/"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeSyncIrodoriClient.instances[0].base_url == "https://api.example.com"
 
 
 def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
