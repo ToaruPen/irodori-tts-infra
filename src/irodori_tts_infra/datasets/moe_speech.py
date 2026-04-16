@@ -292,5 +292,4 @@ def _entry_path(entry: object) -> str:
 
 
 def _load_huggingface_helpers() -> tuple[Callable[..., Any], Callable[..., str]]:
-    # Future JEV2 fallback should plug in here with the same record-yielding contract.
     return list_repo_tree, hf_hub_download
