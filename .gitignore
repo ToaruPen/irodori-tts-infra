@@ -98,5 +98,8 @@ tensorboard/
 # Claude Code local workflow state
 .claude/
 
+# Git worktrees (parallel branch checkouts)
+.worktrees/
+
 # Private TODO / investigation notes (not shared)
 docs/todo/
