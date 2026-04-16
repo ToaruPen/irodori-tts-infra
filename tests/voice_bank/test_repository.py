@@ -270,6 +270,37 @@ sample_rate = 40000
 
 
 @pytest.mark.parametrize(
+    "prototype_fields",
+    [
+        'neutral_prototype = "/prototypes/chizuru-neutral.npy"',
+        """
+[characters."チヅル".state_prototypes]
+happy = "/prototypes/chizuru-happy.npy"
+""",
+    ],
+)
+def test_load_voice_profile_rejects_absolute_rvc_prototype_paths(
+    tmp_path: Path,
+    prototype_fields: str,
+) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_rvc.toml"
+    manifest.write_text(
+        f"""
+[characters."チヅル"]
+model_path = "models/chizuru.pth"
+sample_rate = 40000
+{prototype_fields}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="manifest path values must be relative paths"):
+        load_voice_profile(characters_md, rvc_manifest=manifest)
+
+
+@pytest.mark.parametrize(
     ("field_line", "match"),
     [
         ('sample_rate = "40000"', r"characters\.チヅル\.sample_rate must be an integer"),
