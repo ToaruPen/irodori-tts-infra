@@ -226,7 +226,7 @@ def test_extract_character_wraps_malformed_wav_errors(tmp_path: Path) -> None:
 
 
 def test_extract_character_rejects_empty_wav_after_resample(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(UnsupportedAudioFormatError, match="duration"):
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,

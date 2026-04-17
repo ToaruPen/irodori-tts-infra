@@ -177,6 +177,9 @@ def _build_output_wav(wav_bytes: bytes, *, sample_rate: int) -> tuple[bytes, flo
     source_rate, samples = _read_mono_pcm16_samples(wav_bytes)
     resampled = _resample_samples(samples, source_rate=source_rate, target_rate=sample_rate)
     duration_s = len(resampled) / sample_rate
+    if duration_s <= 0.0:
+        msg = "moe-speech clips must have positive duration"
+        raise UnsupportedAudioFormatError(msg)
     return _encode_wav(resampled, sample_rate=sample_rate), duration_s
 
 
