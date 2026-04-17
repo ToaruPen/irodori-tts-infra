@@ -180,6 +180,19 @@ def test_convert_accepts_path_response(tmp_path: Path) -> None:
     )
 
 
+def test_convert_accepts_direct_path_response(tmp_path: Path) -> None:
+    output_path = tmp_path / "converted.wav"
+    output_path.write_bytes(_wav_bytes_for([0, 256, -256], sample_rate=INPUT_SAMPLE_RATE))
+    backend = make_backend(FakeRVCClient(convert_result=str(output_path)))
+
+    result = backend.convert(input_audio(), profile=profile())
+
+    assert result == SynthesizedAudio(
+        wav_bytes=output_path.read_bytes(),
+        sample_rate=INPUT_SAMPLE_RATE,
+    )
+
+
 def test_convert_rejects_non_wav_path_response(tmp_path: Path) -> None:
     output_path = tmp_path / "converted.wav"
     output_path.write_bytes(b"not-a-wav")
