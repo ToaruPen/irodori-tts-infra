@@ -348,6 +348,23 @@ def test_extraction_index_from_json_rejects_invalid_clip_payload() -> None:
         ExtractionIndex.from_json(json.dumps(payload))
 
 
+@pytest.mark.parametrize("entries", [[123], [["a", 1, 2]], "oops"])
+def test_extraction_index_from_json_rejects_malformed_character_entries(
+    entries: object,
+) -> None:
+    payload = {
+        "characters": {"alice": entries},
+        "dataset": "litagin/moe-speech",
+        "include_nsfw": True,
+        "sample_rate": 24_000,
+        "total_bytes": 0,
+        "total_duration_s": 0.0,
+    }
+
+    with pytest.raises(TypeError, match="alice"):
+        ExtractionIndex.from_json(json.dumps(payload))
+
+
 def test_extraction_index_rejects_blank_character_name() -> None:
     with pytest.raises(ValueError, match="character"):
         ExtractionIndex(

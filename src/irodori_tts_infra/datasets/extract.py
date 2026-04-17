@@ -62,6 +62,7 @@ def main(
         raise typer.BadParameter(msg, param_hint="--out")
 
     out_path = Path(out).expanduser().resolve()
+    _validate_out_path(out_path)
     try:
         index = extract_character_dataset(
             character=character,
@@ -87,6 +88,17 @@ def _strip_option(value: object, *, name: str) -> str | None:
         msg = f"{name} must be a string"
         raise TypeError(msg)
     return value.strip()
+
+
+def _validate_out_path(out_path: Path) -> None:
+    if not out_path.exists():
+        return
+    if not out_path.is_dir():
+        msg = "out_dir must be a directory"
+        raise typer.BadParameter(msg, param_hint="--out")
+    if any(out_path.iterdir()):
+        msg = "out_dir must be empty before extraction"
+        raise typer.BadParameter(msg, param_hint="--out")
 
 
 if __name__ == "__main__":

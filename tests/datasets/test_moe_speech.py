@@ -66,6 +66,7 @@ def test_extract_character_filters_and_orders_by_character(tmp_path: Path) -> No
     index = extract_character_dataset(
         character="alice",
         out_dir=tmp_path,
+        include_nsfw=True,
         sample_rate=44_100,
         records=records,
     )
@@ -85,6 +86,7 @@ def test_extract_character_writes_into_existing_empty_out_dir(tmp_path: Path) ->
     index = extract_character_dataset(
         character="alice",
         out_dir=out_dir,
+        include_nsfw=True,
         sample_rate=44_100,
         records=(MoeSpeechRecord("data/alice/wav/alice_000.wav", _make_wav_bytes()),),
     )
@@ -104,6 +106,7 @@ def test_extract_character_rejects_existing_non_empty_out_dir(tmp_path: Path) ->
         extract_character_dataset(
             character="alice",
             out_dir=out_dir,
+            include_nsfw=True,
             records=(),
         )
 
@@ -119,6 +122,7 @@ def test_extract_character_rejects_existing_file_out_dir(tmp_path: Path) -> None
         extract_character_dataset(
             character="alice",
             out_dir=out_dir,
+            include_nsfw=True,
             records=(),
         )
 
@@ -152,6 +156,7 @@ def test_extract_character_failure_leaves_out_dir_untouched(
         extract_character_dataset(
             character="alice",
             out_dir=out_dir,
+            include_nsfw=True,
             sample_rate=OUTPUT_SAMPLE_RATE,
             records=(
                 MoeSpeechRecord("data/alice/wav/alice_000.wav", _make_wav_bytes()),
@@ -171,6 +176,7 @@ def test_extract_character_returns_empty_index_when_no_records_match(tmp_path: P
     index = extract_character_dataset(
         character="alice",
         out_dir=tmp_path,
+        include_nsfw=True,
         records=records,
     )
 
@@ -184,6 +190,7 @@ def test_extract_character_tracks_duration_bytes_and_resamples(tmp_path: Path) -
     index = extract_character_dataset(
         character="alice",
         out_dir=tmp_path,
+        include_nsfw=True,
         sample_rate=24_000,
         records=(MoeSpeechRecord("data/alice/wav/alice_000.wav", _make_wav_bytes()),),
     )
@@ -209,6 +216,7 @@ def test_extract_character_stops_before_exceeding_disk_cap(tmp_path: Path) -> No
     index = extract_character_dataset(
         character="alice",
         out_dir=tmp_path,
+        include_nsfw=True,
         sample_rate=OUTPUT_SAMPLE_RATE,
         max_bytes=max_bytes,
         records=records,
@@ -314,11 +322,21 @@ def test_extract_character_rejects_nsfw_opt_out(tmp_path: Path) -> None:
         )
 
 
+def test_extract_character_defaults_to_nsfw_opt_out(tmp_path: Path) -> None:
+    with pytest.raises(NsfwSubsetUnavailableError, match="non-NSFW subset"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            records=(),
+        )
+
+
 def test_extract_character_rejects_non_mono_wav(tmp_path: Path) -> None:
     with pytest.raises(UnsupportedAudioFormatError, match="mono"):
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,
+            include_nsfw=True,
             records=(
                 MoeSpeechRecord(
                     "data/alice/wav/alice_000.wav",
@@ -333,6 +351,7 @@ def test_extract_character_rejects_non_pcm16_wav(tmp_path: Path) -> None:
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,
+            include_nsfw=True,
             records=(
                 MoeSpeechRecord(
                     "data/alice/wav/alice_000.wav",
@@ -347,6 +366,7 @@ def test_extract_character_wraps_malformed_wav_errors(tmp_path: Path) -> None:
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,
+            include_nsfw=True,
             records=(
                 MoeSpeechRecord(
                     "data/alice/wav/alice_000.wav",
@@ -370,6 +390,7 @@ def test_extract_character_wraps_struct_wav_errors(
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,
+            include_nsfw=True,
             records=(
                 MoeSpeechRecord(
                     "data/alice/wav/alice_000.wav",
@@ -384,6 +405,7 @@ def test_extract_character_rejects_empty_wav_after_resample(tmp_path: Path) -> N
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,
+            include_nsfw=True,
             sample_rate=24_000,
             records=(
                 MoeSpeechRecord(
@@ -462,6 +484,7 @@ def test_extract_character_stops_streaming_once_disk_cap_is_reached(
     index = extract_character_dataset(
         character="alice",
         out_dir=tmp_path,
+        include_nsfw=True,
         sample_rate=44_100,
         max_bytes=max_bytes,
     )

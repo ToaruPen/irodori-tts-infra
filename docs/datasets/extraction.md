@@ -50,6 +50,8 @@ Clip paths are relative to the directory containing `index.json`, which keeps th
 - `--include-nsfw`: allow extraction from the dataset as published
 - `--no-include-nsfw`: fail fast with a clear error instead of silently pretending a clean subset exists
 
+Both the CLI and library default to `--no-include-nsfw`; pass `--include-nsfw` explicitly when extracting `litagin/moe-speech`.
+
 That fail-fast behavior is intentional. It keeps the CLI honest until a real subset or alternate fallback dataset is wired in.
 
 ## Determinism

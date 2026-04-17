@@ -60,7 +60,7 @@ def extract_character_dataset(
     out_dir: Path,
     max_bytes: int = DEFAULT_MAX_BYTES,
     sample_rate: int = DEFAULT_OUTPUT_SAMPLE_RATE,
-    include_nsfw: bool = True,
+    include_nsfw: bool = False,
     dataset_repo: str = DEFAULT_DATASET_REPO,
     hf_token: str | None = None,
     records: Iterable[MoeSpeechRecord] | None = None,

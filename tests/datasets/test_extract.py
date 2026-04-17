@@ -163,6 +163,33 @@ def test_cli_rejects_blank_out(
     assert called is False
 
 
+def test_cli_rejects_existing_file_out(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    called = False
+    out_path = tmp_path / "dataset"
+    out_path.write_text("not a directory", encoding="utf-8")
+
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        nonlocal called
+        called = True
+        msg = "should not be called for invalid output path"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(out_path), "--include-nsfw"],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    assert "out_dir must be a directory" in _plain_output(result.output)
+    assert called is False
+
+
 def test_main_requires_character_and_out_options(tmp_path: Path) -> None:
     with pytest.raises(typer.BadParameter, match="--character is required"):
         extract.main(character=None, out=str(tmp_path))

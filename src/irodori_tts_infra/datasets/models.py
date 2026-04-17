@@ -9,6 +9,7 @@ from typing import Any, Self
 
 MIN_SAMPLE_RATE = 16_000
 MAX_SAMPLE_RATE = 48_000
+JSON_CLIP_ENTRY_FIELD_COUNT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,14 +116,40 @@ class ExtractionIndex:
             include_nsfw=include_nsfw,
             total_bytes=_require_int(data, "total_bytes"),
             total_duration_s=_require_number(data, "total_duration_s"),
-            characters={
-                str(character): tuple(
-                    ExtractedClip.from_json_dict({"path": path, "duration_s": duration_s})
-                    for path, duration_s in entries
-                )
-                for character, entries in raw_characters.items()
-            },
+            characters=_characters_from_json(raw_characters),
         )
+
+
+def _characters_from_json(
+    raw_characters: Mapping[str, Any],
+) -> dict[str, tuple[ExtractedClip, ...]]:
+    return {
+        str(character): _clips_from_json_entries(str(character), entries)
+        for character, entries in raw_characters.items()
+    }
+
+
+def _clips_from_json_entries(character: str, entries: object) -> tuple[ExtractedClip, ...]:
+    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes, bytearray)):
+        msg = f"characters[{character!r}] must be a sequence of [path, duration_s] entries"
+        raise TypeError(msg)
+    return tuple(_clip_from_json_entry(character, entry) for entry in entries)
+
+
+def _clip_from_json_entry(character: str, entry: object) -> ExtractedClip:
+    if (
+        not isinstance(entry, Sequence)
+        or isinstance(entry, (str, bytes, bytearray))
+        or len(entry) != JSON_CLIP_ENTRY_FIELD_COUNT
+    ):
+        msg = f"characters[{character!r}] entry must be [path, duration_s]: {entry!r}"
+        raise TypeError(msg)
+    path, duration_s = entry
+    try:
+        return ExtractedClip.from_json_dict({"path": path, "duration_s": duration_s})
+    except (TypeError, ValueError) as exc:
+        msg = f"characters[{character!r}] invalid clip entry {entry!r}: {exc}"
+        raise TypeError(msg) from exc
 
 
 def _normalize_characters(
