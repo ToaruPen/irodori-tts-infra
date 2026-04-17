@@ -57,6 +57,20 @@ def test_extracted_clip_rejects_blank_path() -> None:
         ExtractedClip(path="   ", duration_s=1.0)
 
 
+@pytest.mark.parametrize("path", ["", None])
+def test_extracted_clip_rejects_non_empty_string_path(path: object) -> None:
+    with pytest.raises(ValueError, match="non-empty string"):
+        ExtractedClip(path=path, duration_s=1.0)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("duration_s", ["1.0", True, None])
+def test_extracted_clip_constructor_rejects_non_numeric_duration(
+    duration_s: object,
+) -> None:
+    with pytest.raises(ValueError, match="positive number"):
+        ExtractedClip(path="alice_000.wav", duration_s=duration_s)  # type: ignore[arg-type]
+
+
 def test_extracted_clip_is_frozen() -> None:
     with pytest.raises(AttributeError):
         ALICE_CLIP_A.path = "mutated"  # type: ignore[misc]
@@ -171,6 +185,49 @@ def test_extraction_index_rejects_non_bool_include_nsfw() -> None:
             total_bytes=0,
             total_duration_s=0.0,
             characters={},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dataset", None),
+        ("sample_rate", "24000"),
+        ("sample_rate", True),
+        ("total_bytes", "0"),
+        ("total_bytes", False),
+        ("total_duration_s", "0.0"),
+        ("total_duration_s", False),
+        ("characters", []),
+    ],
+)
+def test_extraction_index_constructor_rejects_invalid_field_types(
+    field: str,
+    value: object,
+) -> None:
+    kwargs: dict[str, object] = {
+        "characters": {},
+        "dataset": "litagin/moe-speech",
+        "include_nsfw": True,
+        "sample_rate": 24_000,
+        "total_bytes": 0,
+        "total_duration_s": 0.0,
+    }
+    kwargs[field] = value
+
+    with pytest.raises(TypeError, match=field):
+        ExtractionIndex(**kwargs)  # type: ignore[arg-type]
+
+
+def test_extraction_index_constructor_rejects_non_string_character_key() -> None:
+    with pytest.raises(TypeError, match="character"):
+        ExtractionIndex(
+            dataset="litagin/moe-speech",
+            sample_rate=24_000,
+            include_nsfw=True,
+            total_bytes=0,
+            total_duration_s=0.0,
+            characters={1: ()},  # type: ignore[dict-item]
         )
 
 
