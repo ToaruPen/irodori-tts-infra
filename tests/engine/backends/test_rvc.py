@@ -287,7 +287,7 @@ def test_convert_maps_profile_load_error_and_cleans_temp_input(
         (None, "Unexpected RVC response shape"),
         ((), "Unexpected RVC response shape"),
         (("Success", None), "RVC sidecar returned no audio"),
-        (("Success", "not-audio"), "Unexpected RVC response shape"),
+        (("Success", 123), "Unexpected RVC response shape"),
         (("Success", (None, None)), "Unexpected RVC response shape"),
     ],
 )
@@ -352,14 +352,16 @@ def test_convert_warns_when_audio_samples_look_pcm_scaled(
     assert events == [("rvc_sidecar_pcm_sample_out_of_unit_range", {"sample": 2.0})]
 
 
-def test_convert_does_not_wrap_unrelated_value_error() -> None:
+def test_convert_does_not_wrap_unrelated_value_error(tmp_path: Path) -> None:
     client = FakeRVCClient()
     client.predict_exception = ValueError("programming bug")
     client.predict_exception_api_name = "/infer_convert"
-    backend = make_backend(client)
+    backend = make_backend(client, temp_wav_dir=tmp_path)
 
     with pytest.raises(ValueError, match="programming bug"):
         backend.convert(input_audio(), profile=profile())
+
+    assert not any(tmp_path.glob("*.wav"))
 
 
 @pytest.mark.parametrize(
