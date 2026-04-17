@@ -111,6 +111,21 @@ def test_extract_character_rejects_existing_non_empty_out_dir(tmp_path: Path) ->
     assert not (out_dir / "index.json").exists()
 
 
+def test_extract_character_rejects_existing_file_out_dir(tmp_path: Path) -> None:
+    out_dir = tmp_path / "dataset"
+    out_dir.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="out_dir must be a directory"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=out_dir,
+            records=(),
+        )
+
+    assert out_dir.read_text(encoding="utf-8") == "not a directory"
+    assert not (tmp_path / "index.json").exists()
+
+
 def test_extract_character_failure_leaves_out_dir_untouched(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -222,6 +237,15 @@ def test_extract_character_rejects_invalid_character_identifier(tmp_path: Path) 
         )
 
 
+def test_extract_character_rejects_non_string_character(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="character"):
+        extract_character_dataset(
+            character=None,  # type: ignore[arg-type]
+            out_dir=tmp_path,
+            records=(),
+        )
+
+
 def test_extract_character_rejects_out_of_range_sample_rate(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="between"):
         extract_character_dataset(
@@ -242,12 +266,40 @@ def test_extract_character_rejects_sample_rate_above_maximum(tmp_path: Path) -> 
         )
 
 
+@pytest.mark.parametrize("sample_rate", [24_000.5, True])
+def test_extract_character_rejects_non_integer_sample_rate(
+    tmp_path: Path,
+    sample_rate: object,
+) -> None:
+    with pytest.raises(TypeError, match="sample_rate"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            sample_rate=sample_rate,  # type: ignore[arg-type]
+            records=(),
+        )
+
+
 def test_extract_character_rejects_non_positive_max_bytes(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive"):
         extract_character_dataset(
             character="alice",
             out_dir=tmp_path,
             max_bytes=0,
+            records=(),
+        )
+
+
+@pytest.mark.parametrize("max_bytes", ["1", True])
+def test_extract_character_rejects_non_integer_max_bytes(
+    tmp_path: Path,
+    max_bytes: object,
+) -> None:
+    with pytest.raises(TypeError, match="max_bytes"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            max_bytes=max_bytes,  # type: ignore[arg-type]
             records=(),
         )
 

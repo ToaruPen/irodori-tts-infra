@@ -177,6 +177,14 @@ def test_main_requires_character_and_out_options(tmp_path: Path) -> None:
         extract.main(character="alice", out="   ")
 
 
+def test_main_rejects_non_string_character_and_out(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="character"):
+        extract.main(character=object(), out=str(tmp_path))  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="out"):
+        extract.main(character="alice", out=tmp_path)  # type: ignore[arg-type]
+
+
 def test_cli_help_shows_usage() -> None:
     result = CliRunner().invoke(extract.app, ["--help"])
 

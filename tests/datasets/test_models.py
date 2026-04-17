@@ -231,8 +231,23 @@ def test_extraction_index_constructor_rejects_non_string_character_key() -> None
         )
 
 
+@pytest.mark.parametrize("clips", ["", b"", bytearray(), {ALICE_CLIP_A}])
+def test_extraction_index_rejects_unordered_or_text_character_clips(
+    clips: object,
+) -> None:
+    with pytest.raises(TypeError, match="sequence"):
+        ExtractionIndex(
+            dataset="litagin/moe-speech",
+            sample_rate=24_000,
+            include_nsfw=True,
+            total_bytes=0,
+            total_duration_s=0.0,
+            characters={"alice": clips},  # type: ignore[dict-item]
+        )
+
+
 def test_extraction_index_rejects_non_iterable_character_clips() -> None:
-    with pytest.raises(TypeError, match="iterable"):
+    with pytest.raises(TypeError, match="sequence"):
         ExtractionIndex(
             dataset="litagin/moe-speech",
             sample_rate=24_000,

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable as IterableABC
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Self
@@ -138,8 +137,11 @@ def _normalize_characters(
             msg = "character keys must not be blank"
             raise ValueError(msg)
         raw_clips: object = clips
-        if not isinstance(raw_clips, IterableABC):
-            msg = "character clip values must be iterable"
+        if not isinstance(raw_clips, Sequence) or isinstance(
+            raw_clips,
+            (str, bytes, bytearray),
+        ):
+            msg = "character clip values must be a sequence of ExtractedClip instances"
             raise TypeError(msg)
         normalized_clips: list[ExtractedClip] = []
         for clip in raw_clips:

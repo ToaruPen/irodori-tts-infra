@@ -67,9 +67,7 @@ def extract_character_dataset(
 ) -> ExtractionIndex:
     normalized_character = _normalize_character(character)
     _validate_sample_rate(sample_rate)
-    if max_bytes <= 0:
-        msg = "max_bytes must be positive"
-        raise ValueError(msg)
+    _validate_max_bytes(max_bytes)
     _ensure_nsfw_allowed(include_nsfw=include_nsfw)
     _ensure_output_dir_available(out_dir)
 
@@ -277,8 +275,22 @@ def _ensure_nsfw_allowed(*, include_nsfw: bool) -> None:
 
 
 def _validate_sample_rate(sample_rate: int) -> None:
-    if not MIN_SAMPLE_RATE <= sample_rate <= MAX_SAMPLE_RATE:
+    raw_sample_rate: object = sample_rate
+    if not isinstance(raw_sample_rate, int) or isinstance(raw_sample_rate, bool):
+        msg = "sample_rate must be an integer"
+        raise TypeError(msg)
+    if not MIN_SAMPLE_RATE <= raw_sample_rate <= MAX_SAMPLE_RATE:
         msg = "sample_rate must be between 16000 and 48000"
+        raise ValueError(msg)
+
+
+def _validate_max_bytes(max_bytes: int) -> None:
+    raw_max_bytes: object = max_bytes
+    if not isinstance(raw_max_bytes, int) or isinstance(raw_max_bytes, bool):
+        msg = "max_bytes must be an integer"
+        raise TypeError(msg)
+    if raw_max_bytes <= 0:
+        msg = "max_bytes must be positive"
         raise ValueError(msg)
 
 
@@ -294,7 +306,11 @@ def _ensure_output_dir_available(out_dir: Path) -> None:
 
 
 def _normalize_character(character: str) -> str:
-    normalized = character.strip()
+    raw_character: object = character
+    if not isinstance(raw_character, str):
+        msg = "character must be a string"
+        raise TypeError(msg)
+    normalized = raw_character.strip()
     if not normalized:
         msg = "character must not be blank"
         raise ValueError(msg)

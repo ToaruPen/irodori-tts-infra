@@ -51,8 +51,8 @@ def main(
         ),
     ] = False,
 ) -> None:
-    character = character.strip() if character is not None else None
-    out = str(out).strip() if out is not None else None
+    character = _strip_option(character, name="character")
+    out = _strip_option(out, name="out")
 
     if not character:
         msg = "--character is required"
@@ -78,6 +78,15 @@ def main(
 
     clip_count = sum(len(clips) for clips in index.characters.values())
     typer.echo(f"Wrote {clip_count} clip(s) and index.json to {out_path}")
+
+
+def _strip_option(value: object, *, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        msg = f"{name} must be a string"
+        raise TypeError(msg)
+    return value.strip()
 
 
 if __name__ == "__main__":
