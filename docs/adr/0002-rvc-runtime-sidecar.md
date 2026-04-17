@@ -36,6 +36,10 @@ smoke tests on macOS aarch64, Python 3.11.14, with `uv`:
 Conclusion: clean pip install is empirically dead for all current RVC Python
 library candidates on this project's Python 3.11 target. The runtime decision
 therefore needs an explicit exception to ADR 0001's same-process policy.
+The macOS smoke results are packaging triage, not the Windows production
+sign-off. Before first production use, the same installability and sidecar
+contract checks must be repeated on the Windows RTX 4070 host and recorded with
+the pinned RVC commit selected for that deployment.
 
 This ADR also provides the runtime decision that later updates should cross-link
 from [Windows GPU deployment](../deploy/windows.md) and
@@ -117,7 +121,19 @@ Follow-up work:
 - Measure warmed Irodori plus warmed RVC VRAM on the RTX 4070 12GB host before
   production sign-off.
 - Add `tests/engine/backends/test_rvc_sidecar.py`, marked with both `gpu` and
-  `integration`, to smoke-test the Gradio sidecar contract.
+  `integration`, to verify the Gradio sidecar contract:
+  - successful `predict(..., api_name="/infer_convert")` returns the expected
+    converted-audio response shape;
+  - `gradio_client` connection failure maps to `BackendUnavailableError`;
+  - HTTP timeout maps to `BackendUnavailableError`;
+  - calls made after the sidecar stops map to `BackendUnavailableError`;
+  - protocol errors or partial responses from `/infer_convert` map to
+    `BackendUnavailableError`;
+  - raw HTTP, `gradio_client`, `httpx`, or `requests` exceptions do not escape
+    the adapter boundary.
+- On the Windows RTX 4070 host, repeat the RVC package installability checks and
+  run the sidecar contract smoke with the pinned deployment commit before
+  production sign-off.
 - Update `docs/deploy/windows.md` and `docs/deploy/rvc-training.md` to link to
   this ADR when the deploy commands and first pinned RVC commit are available.
 
@@ -172,7 +188,8 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
 - The sidecar lives in a directory such as `C:\Users\user\rvc-sidecar\` with its
   own `.venv` and a pinned git clone of
   `RVC-Project/Retrieval-based-Voice-Conversion-WebUI` at a specific commit.
-  Record the commit SHA here once chosen:
+  Record the commit SHA here once chosen during the first deploy task tracked by
+  issue `#21`:
   `<pin RVC commit on first deploy>`.
 - Start the sidecar with
   `python infer-web.py --port 7865 --noautoopen`.
@@ -184,3 +201,23 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
   `BackendUnavailableError`.
 - Sidecar start/stop automation is out of scope for this ADR and will be handled
   by future deploy commands.
+
+### Operational requirements
+
+- `IRODORI_RVC_SIDECAR_URL` is the configured sidecar base URL. The adapter must
+  use that URL when constructing `gradio_client.Client`.
+- During adapter startup, the RVC adapter must verify sidecar readiness by
+  sending a short health sample to `/infer_convert`. If the sidecar is
+  unreachable or the response shape is invalid, startup fails fast with
+  `BackendUnavailableError`.
+- Runtime calls must distinguish transient network blips from persistent
+  unavailability. Connection and timeout failures receive basic exponential
+  backoff, with three attempts over roughly five seconds, before the adapter maps
+  the failure to `BackendUnavailableError`.
+- Persistent unavailability includes an unreachable `IRODORI_RVC_SIDECAR_URL`, a
+  stopped sidecar, repeated timeout, protocol error, and invalid or partial
+  `/infer_convert` response. None of those failures may leak raw transport or
+  Gradio client exceptions through the engine boundary.
+- Automatic sidecar crash recovery is out of scope for this ADR. Operators must
+  restart the sidecar process manually until future deploy automation provides a
+  supervisor or Windows service wrapper.
