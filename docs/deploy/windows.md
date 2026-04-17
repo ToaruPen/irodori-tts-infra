@@ -86,3 +86,7 @@ uv run uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port 8923
 The PID-file wrapper is intentionally minimal. If the server fails during import
 or startup, inspect the Windows shell environment and run the `uv run uvicorn ...`
 command manually for the full error output.
+
+## RVC Training
+
+See the [RVC training SOP](rvc-training.md) for per-character RVC model training.
