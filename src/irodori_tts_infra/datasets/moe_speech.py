@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import struct
 import sys
 import wave
 from array import array
@@ -33,6 +34,7 @@ DEFAULT_DATASET_REPO = "litagin/moe-speech"
 DEFAULT_MAX_BYTES = 1_073_741_824
 DEFAULT_OUTPUT_SAMPLE_RATE = 24_000
 PCM16_SAMPLE_WIDTH_BYTES = 2
+RESAMPLE_BACKEND_LINEAR = "linear"
 
 
 class DatasetExtractionError(RuntimeError):
@@ -201,7 +203,7 @@ def _read_mono_pcm16_samples(wav_bytes: bytes) -> tuple[int, array[int]]:
 
         samples = array("h")
         samples.frombytes(frames)
-    except (EOFError, ValueError, wave.Error) as exc:
+    except (EOFError, ValueError, wave.Error, struct.error) as exc:
         msg = f"moe-speech clips must be valid mono 16-bit PCM WAV files: {exc}"
         raise UnsupportedAudioFormatError(msg) from exc
 
@@ -219,7 +221,25 @@ def _read_mono_pcm16_samples(wav_bytes: bytes) -> tuple[int, array[int]]:
     return sample_rate, samples
 
 
-def _resample_samples(samples: array[int], *, source_rate: int, target_rate: int) -> array[int]:
+def _resample_samples(
+    samples: array[int],
+    *,
+    source_rate: int,
+    target_rate: int,
+    backend: str = RESAMPLE_BACKEND_LINEAR,
+) -> array[int]:
+    if backend != RESAMPLE_BACKEND_LINEAR:
+        msg = f"unsupported resampling backend: {backend}"
+        raise ValueError(msg)
+    return _resample_samples_linear(samples, source_rate=source_rate, target_rate=target_rate)
+
+
+def _resample_samples_linear(
+    samples: array[int],
+    *,
+    source_rate: int,
+    target_rate: int,
+) -> array[int]:
     if not samples:
         return array("h")
     if source_rate == target_rate:

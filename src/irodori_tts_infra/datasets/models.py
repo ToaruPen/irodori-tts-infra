@@ -30,7 +30,10 @@ class ExtractedClip:
 
     @classmethod
     def from_json_dict(cls, payload: Mapping[str, Any]) -> Self:
-        return cls(path=str(payload["path"]), duration_s=float(payload["duration_s"]))
+        return cls(
+            path=_require_str(payload, "path"),
+            duration_s=_require_number(payload, "duration_s"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,18 +102,40 @@ class ExtractionIndex:
             msg = "include_nsfw must be a boolean"
             raise TypeError(msg)
         return cls(
-            dataset=str(data["dataset"]),
-            sample_rate=int(data["sample_rate"]),
+            dataset=_require_str(data, "dataset"),
+            sample_rate=_require_int(data, "sample_rate"),
             include_nsfw=include_nsfw,
-            total_bytes=int(data["total_bytes"]),
-            total_duration_s=float(data["total_duration_s"]),
+            total_bytes=_require_int(data, "total_bytes"),
+            total_duration_s=_require_number(data, "total_duration_s"),
             characters={
                 str(character): tuple(
-                    ExtractedClip.from_json_dict(
-                        {"path": str(path), "duration_s": float(duration_s)}
-                    )
+                    ExtractedClip.from_json_dict({"path": path, "duration_s": duration_s})
                     for path, duration_s in entries
                 )
                 for character, entries in raw_characters.items()
             },
         )
+
+
+def _require_str(payload: Mapping[str, Any], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str):
+        msg = f"{key} must be a string"
+        raise TypeError(msg)
+    return value
+
+
+def _require_int(payload: Mapping[str, Any], key: str) -> int:
+    value = payload[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        msg = f"{key} must be an integer"
+        raise TypeError(msg)
+    return value
+
+
+def _require_number(payload: Mapping[str, Any], key: str) -> float:
+    value = payload[key]
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        msg = f"{key} must be a number"
+        raise TypeError(msg)
+    return float(value)

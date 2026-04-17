@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import struct
 import wave
+from array import array
 from io import BytesIO
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
+from irodori_tts_infra.datasets import moe_speech
 from irodori_tts_infra.datasets.moe_speech import (
     MoeSpeechRecord,
     NsfwSubsetUnavailableError,
@@ -303,6 +306,29 @@ def test_extract_character_wraps_malformed_wav_errors(tmp_path: Path) -> None:
         )
 
 
+def test_extract_character_wraps_struct_wav_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_wave_open(*_args: object, **_kwargs: object) -> object:
+        msg = "corrupt header"
+        raise struct.error(msg)
+
+    monkeypatch.setattr("irodori_tts_infra.datasets.moe_speech.wave.open", fake_wave_open)
+
+    with pytest.raises(UnsupportedAudioFormatError, match="corrupt header"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            records=(
+                MoeSpeechRecord(
+                    "data/alice/wav/alice_000.wav",
+                    b"bad wav",
+                ),
+            ),
+        )
+
+
 def test_extract_character_rejects_empty_wav_after_resample(tmp_path: Path) -> None:
     with pytest.raises(UnsupportedAudioFormatError, match="duration"):
         extract_character_dataset(
@@ -315,6 +341,16 @@ def test_extract_character_rejects_empty_wav_after_resample(tmp_path: Path) -> N
                     _make_empty_wav_bytes(),
                 ),
             ),
+        )
+
+
+def test_resample_samples_rejects_unknown_backend() -> None:
+    with pytest.raises(ValueError, match="backend"):
+        moe_speech._resample_samples(  # noqa: SLF001 - review targets this private helper.
+            array("h", [0, 1]),
+            source_rate=44_100,
+            target_rate=24_000,
+            backend="sinc",
         )
 
 

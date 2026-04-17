@@ -73,6 +73,19 @@ def test_extracted_clip_from_json_dict_round_trip() -> None:
     assert restored == ALICE_CLIP_A
 
 
+def test_extracted_clip_from_json_dict_rejects_non_string_path() -> None:
+    with pytest.raises(TypeError, match="path"):
+        ExtractedClip.from_json_dict({"path": 123, "duration_s": 1.0})
+
+
+@pytest.mark.parametrize("duration_s", ["1.0", True, None])
+def test_extracted_clip_from_json_dict_rejects_non_numeric_duration(
+    duration_s: object,
+) -> None:
+    with pytest.raises(TypeError, match="duration_s"):
+        ExtractedClip.from_json_dict({"path": "alice_000.wav", "duration_s": duration_s})
+
+
 # ---------------------------------------------------------------------------
 # ExtractionIndex validation
 # ---------------------------------------------------------------------------
@@ -152,6 +165,50 @@ def test_extraction_index_from_json_rejects_non_bool_include_nsfw(
 
     with pytest.raises(TypeError, match="include_nsfw"):
         ExtractionIndex.from_json(bad_json)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dataset", None),
+        ("sample_rate", "24000"),
+        ("sample_rate", True),
+        ("total_bytes", "0"),
+        ("total_bytes", False),
+        ("total_duration_s", "0.0"),
+        ("total_duration_s", True),
+    ],
+)
+def test_extraction_index_from_json_rejects_coerced_scalar_fields(
+    field: str,
+    value: object,
+) -> None:
+    payload: dict[str, object] = {
+        "characters": {},
+        "dataset": "litagin/moe-speech",
+        "include_nsfw": True,
+        "sample_rate": 24_000,
+        "total_bytes": 0,
+        "total_duration_s": 0.0,
+    }
+    payload[field] = value
+
+    with pytest.raises(TypeError, match=field):
+        ExtractionIndex.from_json(json.dumps(payload))
+
+
+def test_extraction_index_from_json_rejects_invalid_clip_payload() -> None:
+    payload = {
+        "characters": {"alice": [[123, "1.0"]]},
+        "dataset": "litagin/moe-speech",
+        "include_nsfw": True,
+        "sample_rate": 24_000,
+        "total_bytes": 0,
+        "total_duration_s": 0.0,
+    }
+
+    with pytest.raises(TypeError, match="path"):
+        ExtractionIndex.from_json(json.dumps(payload))
 
 
 def test_extraction_index_rejects_blank_character_name() -> None:
