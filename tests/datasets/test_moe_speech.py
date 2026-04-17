@@ -234,7 +234,10 @@ def test_stream_character_records_downloads_sorted_repo_paths(
         filename = kwargs["filename"]
         if filename == "data/alice/wav/alice_001.wav":
             return str(first)
-        return str(second)
+        if filename == "data/alice/wav/alice_002.wav":
+            return str(second)
+        message = f"Unexpected fixture filename: {filename}"
+        raise AssertionError(message)
 
     monkeypatch.setattr(
         "irodori_tts_infra.datasets.moe_speech._load_huggingface_helpers",

@@ -108,8 +108,5 @@ tensorboard/
 # Git worktrees (parallel branch checkouts)
 .worktrees/
 
-# Git worktrees (parallel branch checkouts)
-.worktrees/
-
 # Private TODO / investigation notes (not shared)
 docs/todo/
