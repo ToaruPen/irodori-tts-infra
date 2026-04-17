@@ -128,6 +128,7 @@ def test_cli_rejects_blank_character(
     )
 
     assert result.exit_code != 0
+    assert "--character is required" in result.output
     assert called is False
 
 
@@ -150,6 +151,7 @@ def test_cli_rejects_blank_out(
     )
 
     assert result.exit_code != 0
+    assert "--out is required" in result.output
     assert called is False
 
 

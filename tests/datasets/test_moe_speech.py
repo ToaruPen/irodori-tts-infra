@@ -77,6 +77,75 @@ def test_extract_character_filters_and_orders_by_character(tmp_path: Path) -> No
     assert not (tmp_path / "bob_000.wav").exists()
 
 
+def test_extract_character_writes_into_existing_empty_out_dir(tmp_path: Path) -> None:
+    out_dir = tmp_path / "dataset"
+    out_dir.mkdir()
+
+    index = extract_character_dataset(
+        character="alice",
+        out_dir=out_dir,
+        sample_rate=44_100,
+        records=(MoeSpeechRecord("data/alice/wav/alice_000.wav", _make_wav_bytes()),),
+    )
+
+    assert index.path_durations_by_character == {"alice": (("alice_000.wav", 1.0),)}
+    assert (out_dir / "alice_000.wav").is_file()
+    assert (out_dir / "index.json").is_file()
+
+
+def test_extract_character_rejects_existing_non_empty_out_dir(tmp_path: Path) -> None:
+    out_dir = tmp_path / "dataset"
+    out_dir.mkdir()
+    existing_file = out_dir / "keep.txt"
+    existing_file.write_text("existing", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="empty"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=out_dir,
+            records=(),
+        )
+
+    assert existing_file.read_text(encoding="utf-8") == "existing"
+    assert not (out_dir / "index.json").exists()
+
+
+def test_extract_character_failure_leaves_out_dir_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "dataset"
+    out_dir.mkdir()
+    call_count = 0
+
+    def fake_build_output_wav(_wav_bytes: bytes, *, sample_rate: int) -> tuple[bytes, float]:
+        nonlocal call_count
+        assert sample_rate == OUTPUT_SAMPLE_RATE
+        call_count += 1
+        if call_count == 1:
+            return b"first wav", 1.0
+        msg = "bad second clip"
+        raise UnsupportedAudioFormatError(msg)
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.datasets.moe_speech._build_output_wav",
+        fake_build_output_wav,
+    )
+
+    with pytest.raises(UnsupportedAudioFormatError, match="bad second clip"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=out_dir,
+            sample_rate=OUTPUT_SAMPLE_RATE,
+            records=(
+                MoeSpeechRecord("data/alice/wav/alice_000.wav", _make_wav_bytes()),
+                MoeSpeechRecord("data/alice/wav/alice_001.wav", _make_wav_bytes()),
+            ),
+        )
+
+    assert list(out_dir.iterdir()) == []
+
+
 def test_extract_character_returns_empty_index_when_no_records_match(tmp_path: Path) -> None:
     records = (
         MoeSpeechRecord("data/bob/wav/bob_000.wav", _make_wav_bytes()),
@@ -138,6 +207,15 @@ def test_extract_character_rejects_blank_character(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="blank"):
         extract_character_dataset(
             character="   ",
+            out_dir=tmp_path,
+            records=(),
+        )
+
+
+def test_extract_character_rejects_invalid_character_identifier(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="identifier"):
+        extract_character_dataset(
+            character="alice/bob",
             out_dir=tmp_path,
             records=(),
         )

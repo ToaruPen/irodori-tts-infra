@@ -7,6 +7,7 @@ from array import array
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -22,8 +23,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
 _LOGGER = structlog.get_logger(__name__)
+_REPO_SEGMENT_PATTERN = r"[0-9A-Za-z_-]+"
+_REPO_SEGMENT_RE = re.compile(_REPO_SEGMENT_PATTERN)
 _REPO_PATH_RE = re.compile(
-    r"(?:^|/)data/(?P<character>[0-9A-Za-z_-]+)/wav/(?P<filename>[^/]+\.wav)$"
+    rf"(?:^|/)data/(?P<character>{_REPO_SEGMENT_PATTERN})/wav/(?P<filename>[^/]+\.wav)$"
 )
 
 DEFAULT_DATASET_REPO = "litagin/moe-speech"
@@ -67,6 +70,7 @@ def extract_character_dataset(
         msg = "max_bytes must be positive"
         raise ValueError(msg)
     _ensure_nsfw_allowed(include_nsfw=include_nsfw)
+    _ensure_output_dir_available(out_dir)
 
     if records is None:
         ordered_records: Iterable[MoeSpeechRecord] = stream_character_records(
@@ -88,39 +92,43 @@ def extract_character_dataset(
             )
         )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    extracted: list[ExtractedClip] = []
-    total_bytes = 0
-    total_duration_s = 0.0
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=f".{out_dir.name}.", dir=out_dir.parent) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        extracted: list[ExtractedClip] = []
+        total_bytes = 0
+        total_duration_s = 0.0
 
-    for record in ordered_records:
-        file_name = _file_name_from_repo_path(record.repo_path)
-        output_bytes, duration_s = _build_output_wav(record.wav_bytes, sample_rate=sample_rate)
-        if total_bytes + len(output_bytes) > max_bytes:
-            _LOGGER.info(
-                "datasets_moe_speech_disk_cap_reached",
-                character=normalized_character,
-                current_total_bytes=total_bytes,
-                max_bytes=max_bytes,
-                next_file=file_name,
-            )
-            break
+        for record in ordered_records:
+            file_name = _file_name_from_repo_path(record.repo_path)
+            output_bytes, duration_s = _build_output_wav(record.wav_bytes, sample_rate=sample_rate)
+            if total_bytes + len(output_bytes) > max_bytes:
+                _LOGGER.info(
+                    "datasets_moe_speech_disk_cap_reached",
+                    character=normalized_character,
+                    current_total_bytes=total_bytes,
+                    max_bytes=max_bytes,
+                    next_file=file_name,
+                )
+                break
 
-        (out_dir / file_name).write_bytes(output_bytes)
-        extracted.append(ExtractedClip(path=file_name, duration_s=duration_s))
-        total_bytes += len(output_bytes)
-        total_duration_s += duration_s
+            (temp_dir / file_name).write_bytes(output_bytes)
+            extracted.append(ExtractedClip(path=file_name, duration_s=duration_s))
+            total_bytes += len(output_bytes)
+            total_duration_s += duration_s
 
-    index = ExtractionIndex(
-        dataset=dataset_repo,
-        sample_rate=sample_rate,
-        include_nsfw=include_nsfw,
-        total_bytes=total_bytes,
-        total_duration_s=total_duration_s,
-        characters={normalized_character: tuple(extracted)},
-    )
-    serialized_index = index.to_json()
-    (out_dir / "index.json").write_text(serialized_index, encoding="utf-8")
+        index = ExtractionIndex(
+            dataset=dataset_repo,
+            sample_rate=sample_rate,
+            include_nsfw=include_nsfw,
+            total_bytes=total_bytes,
+            total_duration_s=total_duration_s,
+            characters={normalized_character: tuple(extracted)},
+        )
+        serialized_index = index.to_json()
+        (temp_dir / "index.json").write_text(serialized_index, encoding="utf-8")
+        temp_dir.replace(out_dir)
+
     _LOGGER.info(
         "datasets_moe_speech_extracted",
         character=normalized_character,
@@ -268,10 +276,24 @@ def _validate_sample_rate(sample_rate: int) -> None:
         raise ValueError(msg)
 
 
+def _ensure_output_dir_available(out_dir: Path) -> None:
+    if not out_dir.exists():
+        return
+    if not out_dir.is_dir():
+        msg = "out_dir must be a directory"
+        raise ValueError(msg)
+    if any(out_dir.iterdir()):
+        msg = "out_dir must be empty before extraction"
+        raise ValueError(msg)
+
+
 def _normalize_character(character: str) -> str:
     normalized = character.strip()
     if not normalized:
         msg = "character must not be blank"
+        raise ValueError(msg)
+    if _REPO_SEGMENT_RE.fullmatch(normalized) is None:
+        msg = "character must be a repository identifier matching [0-9A-Za-z_-]+"
         raise ValueError(msg)
     return normalized
 
