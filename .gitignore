@@ -78,6 +78,12 @@ data/raw/
 data/interim/
 data/processed/
 datasets/
+!src/irodori_tts_infra/datasets/
+!src/irodori_tts_infra/datasets/**
+!tests/datasets/
+!tests/datasets/**
+!docs/datasets/
+!docs/datasets/**
 runs/
 tensorboard/
 *.npy
@@ -97,6 +103,7 @@ tensorboard/
 
 # Claude Code local workflow state
 .claude/
+.copilot/
 
 # Git worktrees (parallel branch checkouts)
 .worktrees/
