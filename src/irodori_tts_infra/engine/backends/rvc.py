@@ -53,6 +53,7 @@ _PINNED_FILTER_RADIUS = 3
 _PINNED_RMS_MIX_RATE = 1
 _PINNED_PROTECT = 0.33
 _PAIR_LEN = 2
+_MAX_AUDIO_NESTING_DEPTH = 100
 
 logger = structlog.get_logger(__name__)
 
@@ -280,7 +281,10 @@ def _encode_wav_bytes(audio_array: object, *, sample_rate: int) -> bytes:
         return buffer.getvalue()
 
 
-def _flatten_audio(audio_array: object) -> list[float]:
+def _flatten_audio(audio_array: object, *, _depth: int = 0) -> list[float]:
+    if _depth >= _MAX_AUDIO_NESTING_DEPTH:
+        msg = "Unexpected RVC audio payload"
+        raise BackendUnavailableError(msg)
     if isinstance(audio_array, _ListConvertible):
         audio_array = audio_array.tolist()
     if isinstance(audio_array, Iterable) and not isinstance(
@@ -290,7 +294,7 @@ def _flatten_audio(audio_array: object) -> list[float]:
         samples: list[float] = []
         for item in audio_array:
             if isinstance(item, Iterable) and not isinstance(item, (str, bytes, bytearray)):
-                samples.extend(_flatten_audio(item))
+                samples.extend(_flatten_audio(item, _depth=_depth + 1))
             else:
                 try:
                     samples.append(float(item))

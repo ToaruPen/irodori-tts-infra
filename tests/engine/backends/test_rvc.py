@@ -304,6 +304,18 @@ def test_convert_rejects_nested_non_numeric_audio_payload() -> None:
         backend.convert(input_audio(), profile=profile())
 
 
+def test_convert_rejects_deeply_nested_audio_payload() -> None:
+    audio_payload: object = 0.0
+    for _ in range(101):
+        audio_payload = [audio_payload]
+    backend = make_backend(
+        FakeRVCClient(convert_result=("Success", (INPUT_SAMPLE_RATE, audio_payload)))
+    )
+
+    with pytest.raises(BackendUnavailableError, match="Unexpected RVC audio payload"):
+        backend.convert(input_audio(), profile=profile())
+
+
 def test_convert_warns_when_audio_samples_look_pcm_scaled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -335,6 +347,26 @@ def test_convert_does_not_wrap_unrelated_value_error() -> None:
 
     with pytest.raises(ValueError, match="programming bug"):
         backend.convert(input_audio(), profile=profile())
+
+
+@pytest.mark.parametrize(
+    ("sample", "expected"),
+    [
+        (-1.0, -32_767),
+        (0.0, 0),
+        (1.0, 32_767),
+        (-1.0001, -1),
+        (1.0001, 1),
+        (-32_768.0, -32_768),
+        (32_768.0, 32_767),
+    ],
+)
+def test_convert_applies_pcm16_boundary_values(sample: float, expected: int) -> None:
+    backend = make_backend(FakeRVCClient(convert_result=("Success", (INPUT_SAMPLE_RATE, [sample]))))
+
+    result = backend.convert(input_audio(), profile=profile())
+
+    assert _wav_samples(result.wav_bytes) == [expected]
 
 
 def test_warm_up_calls_view_api_once() -> None:
@@ -388,6 +420,15 @@ def test_close_prefers_client_close_over_session_close() -> None:
 
     assert client.close_count == 1
     assert client.session.close_count == 0
+
+
+def test_convert_after_close_raises_backend_unavailable() -> None:
+    backend = make_backend()
+
+    backend.close()
+
+    with pytest.raises(BackendUnavailableError, match="backend is closed"):
+        backend.convert(input_audio(), profile=profile())
 
 
 def test_sample_rate_mismatch_raises_backend_unavailable() -> None:
