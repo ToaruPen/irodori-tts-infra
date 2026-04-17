@@ -208,12 +208,14 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
   use that URL when constructing `gradio_client.Client`.
 - During adapter startup, the RVC adapter must verify sidecar readiness by
   sending a short health sample to `/infer_convert`. If the sidecar is
-  unreachable or the response shape is invalid, startup fails fast with
-  `BackendUnavailableError`.
+  unreachable or the response shape is invalid after the fixed retry contract
+  below, startup fails fast with `BackendUnavailableError`.
 - Runtime calls must distinguish transient network blips from persistent
-  unavailability. Connection and timeout failures receive basic exponential
-  backoff, with three attempts over roughly five seconds, before the adapter maps
-  the failure to `BackendUnavailableError`.
+  unavailability. Startup health checks and runtime calls use the same fixed
+  retry contract for connection and timeout failures: 3 attempts total,
+  1500ms per-attempt timeout, exponential backoff delays of 500ms then 1000ms
+  between attempts, and no jitter. After the third failed attempt, the adapter
+  maps the failure to `BackendUnavailableError`.
 - Persistent unavailability includes an unreachable `IRODORI_RVC_SIDECAR_URL`, a
   stopped sidecar, repeated timeout, protocol error, and invalid or partial
   `/infer_convert` response. None of those failures may leak raw transport or
