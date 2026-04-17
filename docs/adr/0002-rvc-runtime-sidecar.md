@@ -128,9 +128,12 @@ Follow-up work:
   - HTTP timeout maps to `BackendUnavailableError`;
   - calls made after the sidecar stops map to `BackendUnavailableError`;
   - protocol errors or partial responses from `/infer_convert` map to
-    `BackendUnavailableError`;
+    `BackendUnavailableError` without retry;
   - raw HTTP, `gradio_client`, `httpx`, or `requests` exceptions do not escape
-    the adapter boundary.
+    the adapter boundary;
+  - retry instrumentation proves exactly 3 attempts for connection/timeout
+    failures, a 1500ms request timeout, 500ms then 1000ms backoff delays, and no
+    jitter.
 - On the Windows RTX 4070 host, repeat the RVC package installability checks and
   run the sidecar contract smoke with the pinned deployment commit before
   production sign-off.
@@ -181,23 +184,26 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
 
 ## Implementation Notes
 
-- `gradio_client` is added to the `rvc` optional-dependency group.
-- The official `RVC-Project/Retrieval-based-Voice-Conversion-WebUI` runs in its
-  own uv-managed virtual environment on the Windows GPU host, separate from the
-  main FastAPI/Irodori uv environment.
-- The sidecar lives in a directory such as `C:\Users\user\rvc-sidecar\` with its
-  own `.venv` and a pinned git clone of
+- `src/irodori_tts_infra/engine/backends/rvc.py` currently exists only as an
+  empty placeholder, and `src/irodori_tts_infra/config/settings.py` does not yet
+  define `IRODORI_RVC_SIDECAR_URL`. Those are follow-up implementation tasks.
+- `gradio_client` will be added to the `rvc` optional-dependency group.
+- The official `RVC-Project/Retrieval-based-Voice-Conversion-WebUI` will run in
+  its own uv-managed virtual environment on the Windows GPU host, separate from
+  the main FastAPI/Irodori uv environment.
+- The sidecar will live in a directory such as `C:\Users\user\rvc-sidecar\` with
+  its own `.venv` and a pinned git clone of
   `RVC-Project/Retrieval-based-Voice-Conversion-WebUI` at a specific commit.
   Record the commit SHA here once chosen during the first deploy task tracked by
   issue `#21`:
   `<pin RVC commit on first deploy>`.
 - Start the sidecar with
   `python infer-web.py --port 7865 --noautoopen`.
-- Port `7865` is the default sidecar port. The main server configures the full
-  URL with `IRODORI_RVC_SIDECAR_URL`.
-- The RVC adapter at `src/irodori_tts_infra/engine/backends/rvc.py` calls
-  `gradio_client.Client(...).predict(..., api_name="/infer_convert")` and maps
-  connection, timeout, and unavailable-sidecar failures to
+- Port `7865` is the default sidecar port. The main server must configure the
+  full URL with `IRODORI_RVC_SIDECAR_URL`.
+- The RVC adapter at `src/irodori_tts_infra/engine/backends/rvc.py` must call
+  `gradio_client.Client(...).predict(..., api_name="/infer_convert")` and must
+  map connection, timeout, and unavailable-sidecar failures to
   `BackendUnavailableError`.
 - Sidecar start/stop automation is out of scope for this ADR and will be handled
   by future deploy commands.
@@ -207,9 +213,10 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
 - `IRODORI_RVC_SIDECAR_URL` is the configured sidecar base URL. The adapter must
   use that URL when constructing `gradio_client.Client`.
 - During adapter startup, the RVC adapter must verify sidecar readiness by
-  sending a short health sample to `/infer_convert`. If the sidecar is
-  unreachable or the response shape is invalid after the fixed retry contract
-  below, startup fails fast with `BackendUnavailableError`.
+  sending a short health sample to `/infer_convert`. Connection and timeout
+  failures use the fixed retry contract below. A protocol error or invalid
+  response shape is non-retryable and immediately raises
+  `BackendUnavailableError`.
 - Runtime calls must distinguish transient network blips from persistent
   unavailability. Startup health checks and runtime calls use the same fixed
   retry contract for connection and timeout failures: 3 attempts total,
@@ -218,8 +225,10 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
   maps the failure to `BackendUnavailableError`.
 - Persistent unavailability includes an unreachable `IRODORI_RVC_SIDECAR_URL`, a
   stopped sidecar, repeated timeout, protocol error, and invalid or partial
-  `/infer_convert` response. None of those failures may leak raw transport or
-  Gradio client exceptions through the engine boundary.
+  `/infer_convert` response. Protocol errors and invalid or partial responses
+  are non-retryable; connection and timeout failures follow the fixed retry
+  contract. None of those failures may leak raw transport or Gradio client
+  exceptions through the engine boundary.
 - Automatic sidecar crash recovery is out of scope for this ADR. Operators must
   restart the sidecar process manually until future deploy automation provides a
   supervisor or Windows service wrapper.
