@@ -44,8 +44,11 @@ metrics = [
   "prometheus-client>=0.21,<1",
 ]
 irodori = []
+rvc = [
+  "gradio_client>=1.4,<2",
+]
 all = [
-  "irodori-tts-infra[server,client,metrics,irodori]",
+  "irodori-tts-infra[server,client,metrics,irodori,rvc]",
 ]
 
 [project.scripts]
@@ -245,6 +248,8 @@ ignore_names = [
   "get_health",
   "main",
   "read_aloud",
+  "VoiceConverter",
+  "convert",
   "model_config",
   "model_loaded",
   "status",
