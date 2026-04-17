@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import wave
 from io import BytesIO
 from pathlib import Path
@@ -189,20 +188,14 @@ def test_convert_rejects_path_sample_rate_mismatch(tmp_path: Path) -> None:
 def test_factory_raises_backend_unavailable_on_missing_optional_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_import_module = importlib.import_module
-
-    def fake_import_module(name: str, package: str | None = None) -> object:
-        if name == "gradio_client":
-            msg = "missing gradio_client"
-            raise ImportError(msg)
-        return original_import_module(name, package)
-
-    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+    error = ImportError("missing gradio_client")
+    monkeypatch.setattr(rvc_module, "_gradio_client", None)
+    monkeypatch.setattr(rvc_module, "_gradio_client_import_error", error)
 
     with pytest.raises(BackendUnavailableError, match="gradio_client") as exc_info:
         rvc_module.create_rvc_backend(sidecar_settings())
 
-    assert isinstance(exc_info.value.__cause__, ImportError)
+    assert exc_info.value.__cause__ is error
 
 
 @pytest.mark.parametrize("error_cls", [ConnectionError, TimeoutError])
