@@ -40,15 +40,6 @@ from irodori_tts_infra.engine.models import SynthesizedAudio
 if TYPE_CHECKING:
     from irodori_tts_infra.voice_bank.models import RVCProfile
 
-_gradio_client_import_error: ImportError | None
-try:
-    import gradio_client as _gradio_client  # type: ignore[import-not-found]
-except ImportError as exc:
-    _gradio_client = None
-    _gradio_client_import_error = exc
-else:
-    _gradio_client_import_error = None
-
 INSTALL_HINT = "RVC backend requires optional dependencies. Install: pip install gradio_client"
 _CHANGE_VOICE_API_NAME = "/infer_change_voice"
 _PINNED_SPEAKER_ID = 0
@@ -191,9 +182,11 @@ def create_rvc_backend(
 
 
 def _import_gradio_client() -> ClientFactory:
-    if _gradio_client is None:
-        raise BackendUnavailableError(INSTALL_HINT) from _gradio_client_import_error
-    return cast("ClientFactory", _gradio_client.Client)
+    try:
+        import gradio_client  # type: ignore[import-not-found,import-untyped,unused-ignore] # noqa: PLC0415
+    except ImportError as exc:
+        raise BackendUnavailableError(INSTALL_HINT) from exc
+    return cast("ClientFactory", gradio_client.Client)
 
 
 def _timeout_for(settings: RVCSidecarSettings) -> object:

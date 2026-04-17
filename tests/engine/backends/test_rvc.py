@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import builtins
 import wave
+from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -189,8 +191,20 @@ def test_factory_raises_backend_unavailable_on_missing_optional_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     error = ImportError("missing gradio_client")
-    monkeypatch.setattr(rvc_module, "_gradio_client", None)
-    monkeypatch.setattr(rvc_module, "_gradio_client_import_error", error)
+    original_import = builtins.__import__
+
+    def fake_import(
+        name: str,
+        globals_: Mapping[str, object] | None = None,
+        locals_: Mapping[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "gradio_client":
+            raise error
+        return original_import(name, globals_, locals_, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
 
     with pytest.raises(BackendUnavailableError, match="gradio_client") as exc_info:
         rvc_module.create_rvc_backend(sidecar_settings())
