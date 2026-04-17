@@ -221,8 +221,10 @@ def test_stream_character_records_downloads_sorted_repo_paths(
 ) -> None:
     first = tmp_path / "alice_001.wav"
     second = tmp_path / "alice_002.wav"
-    first.write_bytes(_make_wav_bytes())
-    second.write_bytes(_make_wav_bytes())
+    first_bytes = _make_wav_bytes()
+    second_bytes = _make_wav_bytes(seconds=0.5)
+    first.write_bytes(first_bytes)
+    second.write_bytes(second_bytes)
 
     def fake_list_repo_tree(**_kwargs: object) -> list[object]:
         return [
@@ -250,6 +252,7 @@ def test_stream_character_records_downloads_sorted_repo_paths(
         "data/alice/wav/alice_001.wav",
         "data/alice/wav/alice_002.wav",
     ]
+    assert [record.wav_bytes for record in records] == [first_bytes, second_bytes]
 
 
 def test_extract_character_stops_streaming_once_disk_cap_is_reached(
