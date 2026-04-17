@@ -129,6 +129,23 @@ def test_blank_path_values_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None
         PathSettings()
 
 
+def test_rvc_sidecar_invalid_url_rejected() -> None:
+    with pytest.raises(ValidationError, match="url"):
+        RVCSidecarSettings.model_validate({"url": "not-a-valid-url"})
+
+
+@pytest.mark.parametrize("api_name", ["", "infer_convert"])
+def test_rvc_sidecar_api_name_must_start_with_slash(api_name: str) -> None:
+    with pytest.raises(ValidationError, match="api_name"):
+        RVCSidecarSettings.model_validate({"api_name": api_name})
+
+
+@pytest.mark.parametrize("timeout_field", ["connect_timeout_seconds", "convert_timeout_seconds"])
+def test_rvc_sidecar_zero_timeout_rejected(timeout_field: str) -> None:
+    with pytest.raises(ValidationError, match="greater than"):
+        RVCSidecarSettings.model_validate({timeout_field: 0})
+
+
 def test_config_import_does_not_import_heavy_layers() -> None:
     code = """
 import sys

@@ -51,11 +51,15 @@ class _ProtocolFakeRVCClient:
         return None
 
 
-def test_rvc_backend_implements_voice_converter_protocol() -> None:
+def test_rvc_backend_implements_voice_converter_protocol(tmp_path: Path) -> None:
     converter: VoiceConverter = RVCConverter(
         client=_ProtocolFakeRVCClient(),
         settings=RVCSidecarSettings(),
+        temp_wav_dir=tmp_path,
     )
+
+    assert isinstance(converter, VoiceConverter)
+    assert callable(converter.convert)
 
     result = converter.convert(
         SynthesizedAudio(
@@ -68,6 +72,4 @@ def test_rvc_backend_implements_voice_converter_protocol() -> None:
         ),
     )
 
-    assert isinstance(converter, VoiceConverter)
-    assert callable(converter.convert)
     assert result.sample_rate == PROTOCOL_SAMPLE_RATE

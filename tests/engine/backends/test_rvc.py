@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import builtins
 import wave
-from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from irodori_tts_infra.config.settings import RVCSidecarSettings
+from irodori_tts_infra.config.settings import PathSettings, RVCSidecarSettings
 from irodori_tts_infra.engine.backends import rvc as rvc_module
 from irodori_tts_infra.engine.backends.rvc import RVCConverter, create_rvc_backend
 from irodori_tts_infra.engine.errors import BackendUnavailableError
@@ -110,10 +109,12 @@ def make_backend(
     client: FakeRVCClient | None = None,
     *,
     settings: RVCSidecarSettings | None = None,
+    temp_wav_dir: Path | None = None,
 ) -> RVCConverter:
     return RVCConverter(
         client=client or FakeRVCClient(),
         settings=settings or sidecar_settings(),
+        temp_wav_dir=temp_wav_dir or PathSettings().temp_wav_dir,
     )
 
 
@@ -134,9 +135,18 @@ def _wav_sample_rate(wav_bytes: bytes) -> int:
         return wav_file.getframerate()
 
 
-def test_convert_packs_official_webui_arguments_and_cleans_temp_input() -> None:
+def _wav_samples(wav_bytes: bytes) -> list[int]:
+    with wave.open(BytesIO(wav_bytes), "rb") as wav_file:
+        frames = wav_file.readframes(wav_file.getnframes())
+    return [
+        int.from_bytes(frames[index : index + 2], "little", signed=True)
+        for index in range(0, len(frames), 2)
+    ]
+
+
+def test_convert_packs_official_webui_arguments_and_cleans_temp_input(tmp_path: Path) -> None:
     client = FakeRVCClient()
-    backend = make_backend(client)
+    backend = make_backend(client, temp_wav_dir=tmp_path)
 
     result = backend.convert(input_audio(), profile=profile())
 
@@ -148,11 +158,12 @@ def test_convert_packs_official_webui_arguments_and_cleans_temp_input() -> None:
     args, kwargs = client.calls[1]
     assert kwargs == {"api_name": "/infer_convert"}
     assert args[0] == 0
-    assert Path(str(args[1])).suffix == ".wav"
+    input_path = Path(str(args[1]))
+    assert input_path.parent == tmp_path
+    assert input_path.suffix == ".wav"
     assert args[2:] == (0, None, "harvest", "", "", 0.88, 3, INPUT_SAMPLE_RATE, 1, 0.33)
     assert result.sample_rate == INPUT_SAMPLE_RATE
     assert _wav_sample_rate(result.wav_bytes) == INPUT_SAMPLE_RATE
-    input_path = Path(str(args[1]))
     assert not input_path.exists()
 
 
@@ -243,14 +254,12 @@ def test_convert_maps_transport_errors_and_cleans_temp_input(
 
 
 def test_convert_maps_profile_load_error_and_cleans_temp_input(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("IRODORI_TTS_PATH_TEMP_WAV_DIR", str(tmp_path))
     client = FakeRVCClient()
     client.predict_exception = ConnectionError("profile load failed")
     client.predict_exception_api_name = "/infer_change_voice"
-    backend = make_backend(client)
+    backend = make_backend(client, temp_wav_dir=tmp_path)
 
     with pytest.raises(BackendUnavailableError, match="RVC conversion failed") as exc_info:
         backend.convert(input_audio(), profile=profile())
@@ -276,6 +285,67 @@ def test_convert_rejects_unexpected_response_shape(response: object, match: str)
         backend.convert(input_audio(), profile=profile())
 
 
+def test_convert_preserves_nested_audio_array_order() -> None:
+    backend = make_backend(
+        FakeRVCClient(convert_result=("Success", (INPUT_SAMPLE_RATE, [[0.0], [0.5, -0.5]])))
+    )
+
+    result = backend.convert(input_audio(), profile=profile())
+
+    assert _wav_samples(result.wav_bytes) == [0, 16_384, -16_384]
+
+
+def test_convert_rejects_nested_non_numeric_audio_payload() -> None:
+    backend = make_backend(
+        FakeRVCClient(convert_result=("Success", (INPUT_SAMPLE_RATE, [[object()]])))
+    )
+
+    with pytest.raises(BackendUnavailableError, match="Unexpected RVC audio payload"):
+        backend.convert(input_audio(), profile=profile())
+
+
+def test_convert_warns_when_audio_samples_look_pcm_scaled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class FakeLogger:
+        @staticmethod
+        def debug(_event: str, **_fields: object) -> None:
+            return None
+
+        @staticmethod
+        def warning(event: str, **fields: object) -> None:
+            events.append((event, fields))
+
+    monkeypatch.setattr(rvc_module, "logger", FakeLogger())
+    backend = make_backend(FakeRVCClient(convert_result=("Success", (INPUT_SAMPLE_RATE, [2.0]))))
+
+    result = backend.convert(input_audio(), profile=profile())
+
+    assert _wav_samples(result.wav_bytes) == [2]
+    assert events == [("rvc_sidecar_pcm_sample_out_of_unit_range", {"sample": 2.0})]
+
+
+def test_convert_does_not_wrap_unrelated_value_error() -> None:
+    client = FakeRVCClient()
+    client.predict_exception = ValueError("programming bug")
+    client.predict_exception_api_name = "/infer_convert"
+    backend = make_backend(client)
+
+    with pytest.raises(ValueError, match="programming bug"):
+        backend.convert(input_audio(), profile=profile())
+
+
+def test_warm_up_calls_view_api_once() -> None:
+    client = FakeRVCClient()
+    backend = make_backend(client)
+
+    backend.warm_up()
+
+    assert client.view_api_count == 1
+
+
 def test_warm_up_maps_unreachable_sidecar() -> None:
     client = FakeRVCClient()
     client.view_api_exception = TimeoutError("timed out")
@@ -287,7 +357,7 @@ def test_warm_up_maps_unreachable_sidecar() -> None:
     assert isinstance(exc_info.value.__cause__, TimeoutError)
 
 
-def test_close_is_idempotent_with_session_close_fallback() -> None:
+def test_close_is_idempotent_with_session_close_fallback(tmp_path: Path) -> None:
     class SessionOnlyClient:
         def __init__(self) -> None:
             self.session = FakeSession()
@@ -301,12 +371,23 @@ def test_close_is_idempotent_with_session_close_fallback() -> None:
             return None
 
     client = SessionOnlyClient()
-    backend = RVCConverter(client=client, settings=sidecar_settings())
+    backend = RVCConverter(client=client, settings=sidecar_settings(), temp_wav_dir=tmp_path)
 
     backend.close()
     backend.close()
 
     assert client.session.close_count == 1
+
+
+def test_close_prefers_client_close_over_session_close() -> None:
+    client = FakeRVCClient()
+    backend = make_backend(client)
+
+    backend.close()
+    backend.close()
+
+    assert client.close_count == 1
+    assert client.session.close_count == 0
 
 
 def test_sample_rate_mismatch_raises_backend_unavailable() -> None:

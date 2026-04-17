@@ -70,6 +70,6 @@ class RVCSidecarSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="IRODORI_RVC_SIDECAR_", extra="forbid")
 
     url: AnyHttpUrl = cast("AnyHttpUrl", DEFAULT_RVC_SIDECAR_URL)
-    api_name: str = "/infer_convert"
+    api_name: str = Field(default="/infer_convert", min_length=1, pattern=r"^/.*$")
     connect_timeout_seconds: PositiveFloat = 10.0
     convert_timeout_seconds: PositiveFloat = 120.0

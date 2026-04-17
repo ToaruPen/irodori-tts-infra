@@ -82,9 +82,16 @@ class _ListConvertible(Protocol):
 
 
 class RVCConverter:
-    def __init__(self, client: GradioClientLike, settings: RVCSidecarSettings) -> None:
+    def __init__(
+        self,
+        client: GradioClientLike,
+        settings: RVCSidecarSettings,
+        *,
+        temp_wav_dir: Path,
+    ) -> None:
         self._client = client
         self._settings = settings
+        self._temp_wav_dir = temp_wav_dir
         self._closed = False
 
     def warm_up(self) -> None:
@@ -99,7 +106,7 @@ class RVCConverter:
     def convert(self, audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
         self._ensure_open()
 
-        temp_path = _write_temp_input_wav(audio)
+        temp_path = _write_temp_input_wav(audio, self._temp_wav_dir)
         response: object
         try:
             self._load_profile(profile)
@@ -178,7 +185,11 @@ def create_rvc_backend(
         msg = "Failed to create RVC backend"
         raise BackendUnavailableError(msg) from exc
 
-    return RVCConverter(client=client, settings=settings)
+    return RVCConverter(
+        client=client,
+        settings=settings,
+        temp_wav_dir=PathSettings().temp_wav_dir,
+    )
 
 
 def _import_gradio_client() -> ClientFactory:
@@ -197,11 +208,10 @@ def _timeout_for(settings: RVCSidecarSettings) -> object:
     )
 
 
-def _write_temp_input_wav(audio: SynthesizedAudio) -> str:
-    temp_dir = PathSettings().temp_wav_dir
-    temp_dir.mkdir(parents=True, exist_ok=True)
+def _write_temp_input_wav(audio: SynthesizedAudio, temp_wav_dir: Path) -> str:
+    temp_wav_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        dir=temp_dir,
+        dir=temp_wav_dir,
         suffix=".wav",
         delete=False,
     ) as temp_file:
@@ -293,6 +303,8 @@ def _flatten_audio(audio_array: object) -> list[float]:
 
 
 def _to_pcm16(sample: float) -> int:
+    if not -1.0 <= sample <= 1.0:
+        logger.warning("rvc_sidecar_pcm_sample_out_of_unit_range", sample=sample)
     value = round(sample * 32_767) if -1.0 <= sample <= 1.0 else round(sample)
     return max(-32_768, min(32_767, value))
 
@@ -318,7 +330,6 @@ def _client_errors() -> tuple[type[BaseException], ...]:
         ConnectionError,
         TimeoutError,
         OSError,
-        ValueError,
         cast("type[BaseException]", httpx_module.HTTPError),
     )
 
