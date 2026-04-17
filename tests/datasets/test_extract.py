@@ -65,7 +65,10 @@ def test_cli_reports_unavailable_non_nsfw_subset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+    captured: dict[str, object] = {}
+
+    def fake_extract_character_dataset(**kwargs: object) -> ExtractionIndex:
+        captured.update(kwargs)
         msg = "litagin/moe-speech does not publish a separate non-NSFW subset"
         raise NsfwSubsetUnavailableError(msg)
 
@@ -78,9 +81,23 @@ def test_cli_reports_unavailable_non_nsfw_subset(
 
     assert result.exit_code != 0
     assert "non-NSFW subset" in result.output
+    assert captured["include_nsfw"] is False
 
 
-def test_cli_rejects_invalid_sample_rate(tmp_path: Path) -> None:
+def test_cli_rejects_invalid_sample_rate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    called = False
+
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        nonlocal called
+        called = True
+        msg = "should not be called for invalid sample-rate"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
     result = CliRunner().invoke(
         extract.app,
         ["--character", "alice", "--out", str(tmp_path), "--sample-rate", "15999"],
@@ -88,11 +105,59 @@ def test_cli_rejects_invalid_sample_rate(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "16000<=x<=48000" in result.output
+    assert called is False
+
+
+def test_cli_rejects_blank_character(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    called = False
+
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        nonlocal called
+        called = True
+        msg = "should not be called for blank character"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "   ", "--out", str(tmp_path)],
+    )
+
+    assert result.exit_code != 0
+    assert "--character" in result.output
+    assert called is False
+
+
+def test_cli_rejects_blank_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        nonlocal called
+        called = True
+        msg = "should not be called for blank output directory"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", "   "],
+    )
+
+    assert result.exit_code != 0
+    assert "--out" in result.output
+    assert called is False
 
 
 def test_main_requires_character_and_out_options(tmp_path: Path) -> None:
     with pytest.raises(typer.BadParameter, match="--character is required"):
-        extract.main(character=None, out=tmp_path)
+        extract.main(character=None, out=str(tmp_path))
 
     with pytest.raises(typer.BadParameter, match="--out is required"):
         extract.main(character="alice", out=None)

@@ -211,6 +211,20 @@ def test_extract_character_rejects_non_pcm16_wav(tmp_path: Path) -> None:
         )
 
 
+def test_extract_character_wraps_malformed_wav_errors(tmp_path: Path) -> None:
+    with pytest.raises(UnsupportedAudioFormatError, match="valid"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            records=(
+                MoeSpeechRecord(
+                    "data/alice/wav/alice_000.wav",
+                    b"not a wav file",
+                ),
+            ),
+        )
+
+
 def test_extract_character_rejects_empty_wav_after_resample(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive"):
         extract_character_dataset(

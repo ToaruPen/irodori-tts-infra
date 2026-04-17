@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from irodori_tts_infra.datasets.models import ExtractedClip, ExtractionIndex
+from irodori_tts_infra.datasets.models import (
+    MAX_SAMPLE_RATE,
+    MIN_SAMPLE_RATE,
+    ExtractedClip,
+    ExtractionIndex,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -24,8 +29,6 @@ _REPO_PATH_RE = re.compile(
 DEFAULT_DATASET_REPO = "litagin/moe-speech"
 DEFAULT_MAX_BYTES = 1_073_741_824
 DEFAULT_OUTPUT_SAMPLE_RATE = 24_000
-MIN_SAMPLE_RATE = 16_000
-MAX_SAMPLE_RATE = 48_000
 PCM16_SAMPLE_WIDTH_BYTES = 2
 
 
@@ -178,23 +181,28 @@ def _build_output_wav(wav_bytes: bytes, *, sample_rate: int) -> tuple[bytes, flo
 
 
 def _read_mono_pcm16_samples(wav_bytes: bytes) -> tuple[int, array[int]]:
-    with wave.open(BytesIO(wav_bytes), "rb") as wav_file:
-        channels = wav_file.getnchannels()
-        if channels != 1:
-            msg = "moe-speech clips must be mono WAV files"
-            raise UnsupportedAudioFormatError(msg)
-        sample_width = wav_file.getsampwidth()
-        if sample_width != PCM16_SAMPLE_WIDTH_BYTES:
-            msg = "moe-speech clips must be 16-bit PCM WAV files"
-            raise UnsupportedAudioFormatError(msg)
-        sample_rate = wav_file.getframerate()
-        if sample_rate <= 0:
-            msg = "moe-speech clips must declare a positive sample rate"
-            raise UnsupportedAudioFormatError(msg)
-        frames = wav_file.readframes(wav_file.getnframes())
+    try:
+        with wave.open(BytesIO(wav_bytes), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            sample_rate = wav_file.getframerate()
+            frames = wav_file.readframes(wav_file.getnframes())
 
-    samples = array("h")
-    samples.frombytes(frames)
+        samples = array("h")
+        samples.frombytes(frames)
+    except (EOFError, ValueError, wave.Error) as exc:
+        msg = f"moe-speech clips must be valid mono 16-bit PCM WAV files: {exc}"
+        raise UnsupportedAudioFormatError(msg) from exc
+
+    if channels != 1:
+        msg = "moe-speech clips must be mono WAV files"
+        raise UnsupportedAudioFormatError(msg)
+    if sample_width != PCM16_SAMPLE_WIDTH_BYTES:
+        msg = "moe-speech clips must be 16-bit PCM WAV files"
+        raise UnsupportedAudioFormatError(msg)
+    if sample_rate <= 0:
+        msg = "moe-speech clips must declare a positive sample rate"
+        raise UnsupportedAudioFormatError(msg)
     if sys.byteorder != "little":
         samples.byteswap()
     return sample_rate, samples

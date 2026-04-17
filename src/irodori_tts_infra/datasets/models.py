@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Self
 
 if TYPE_CHECKING:
@@ -61,7 +62,7 @@ class ExtractionIndex:
                 msg = "character keys must not be blank"
                 raise ValueError(msg)
             normalized[character] = tuple(clips)
-        object.__setattr__(self, "characters", normalized)
+        object.__setattr__(self, "characters", MappingProxyType(normalized))
 
     @property
     def path_durations_by_character(self) -> dict[str, tuple[tuple[str, float], ...]]:
@@ -93,10 +94,14 @@ class ExtractionIndex:
         if not isinstance(raw_characters, dict):
             msg = "characters payload must be a mapping"
             raise TypeError(msg)
+        include_nsfw = data["include_nsfw"]
+        if not isinstance(include_nsfw, bool):
+            msg = "include_nsfw must be a boolean"
+            raise TypeError(msg)
         return cls(
             dataset=str(data["dataset"]),
             sample_rate=int(data["sample_rate"]),
-            include_nsfw=bool(data["include_nsfw"]),
+            include_nsfw=include_nsfw,
             total_bytes=int(data["total_bytes"]),
             total_duration_s=float(data["total_duration_s"]),
             characters={

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from irodori_tts_infra.datasets.models import MAX_SAMPLE_RATE, MIN_SAMPLE_RATE
 from irodori_tts_infra.datasets.moe_speech import (
     DEFAULT_MAX_BYTES,
     DEFAULT_OUTPUT_SAMPLE_RATE,
@@ -23,13 +24,9 @@ def main(
         typer.Option("--character", help="Speaker identifier inside litagin/moe-speech."),
     ] = None,
     out: Annotated[
-        Path | None,
+        str | None,
         typer.Option(
             "--out",
-            dir_okay=True,
-            file_okay=False,
-            resolve_path=True,
-            writable=True,
             help="Directory to write extracted WAV files and index.json into.",
         ),
     ] = None,
@@ -41,8 +38,8 @@ def main(
         int,
         typer.Option(
             "--sample-rate",
-            min=16_000,
-            max=48_000,
+            min=MIN_SAMPLE_RATE,
+            max=MAX_SAMPLE_RATE,
             help="Output WAV sample rate in Hz.",
         ),
     ] = DEFAULT_OUTPUT_SAMPLE_RATE,
@@ -54,17 +51,21 @@ def main(
         ),
     ] = True,
 ) -> None:
-    if character is None:
+    character = character.strip() if character is not None else None
+    out = str(out).strip() if out is not None else None
+
+    if not character:
         msg = "--character is required"
         raise typer.BadParameter(msg, param_hint="--character")
-    if out is None:
+    if not out:
         msg = "--out is required"
         raise typer.BadParameter(msg, param_hint="--out")
 
+    out_path = Path(out).expanduser().resolve()
     try:
         index = extract_character_dataset(
             character=character,
-            out_dir=out,
+            out_dir=out_path,
             max_bytes=max_bytes,
             sample_rate=sample_rate,
             include_nsfw=include_nsfw,
@@ -76,7 +77,7 @@ def main(
         ) from exc
 
     clip_count = sum(len(clips) for clips in index.characters.values())
-    typer.echo(f"Wrote {clip_count} clip(s) and index.json to {out}")
+    typer.echo(f"Wrote {clip_count} clip(s) and index.json to {out_path}")
 
 
 if __name__ == "__main__":

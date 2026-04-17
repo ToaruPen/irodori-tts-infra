@@ -135,6 +135,25 @@ def test_extraction_index_from_json_rejects_non_dict_characters() -> None:
         ExtractionIndex.from_json(bad_json)
 
 
+@pytest.mark.parametrize("include_nsfw", ["false", "true", 0, 1, None])
+def test_extraction_index_from_json_rejects_non_bool_include_nsfw(
+    include_nsfw: object,
+) -> None:
+    bad_json = json.dumps(
+        {
+            "characters": {},
+            "dataset": "litagin/moe-speech",
+            "include_nsfw": include_nsfw,
+            "sample_rate": 24_000,
+            "total_bytes": 0,
+            "total_duration_s": 0.0,
+        }
+    )
+
+    with pytest.raises(TypeError, match="include_nsfw"):
+        ExtractionIndex.from_json(bad_json)
+
+
 def test_extraction_index_rejects_blank_character_name() -> None:
     with pytest.raises(ValueError, match="character"):
         ExtractionIndex(
@@ -151,6 +170,13 @@ def test_extraction_index_is_frozen() -> None:
     idx = _make_index()
     with pytest.raises(AttributeError):
         idx.dataset = "mutated"  # type: ignore[misc]
+
+
+def test_extraction_index_characters_mapping_is_read_only() -> None:
+    idx = _make_index()
+
+    with pytest.raises(TypeError):
+        idx.characters["bob"] = ()  # type: ignore[index]
 
 
 # ---------------------------------------------------------------------------
