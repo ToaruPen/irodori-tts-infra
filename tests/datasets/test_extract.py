@@ -125,6 +125,7 @@ def test_cli_rejects_blank_character(
     result = CliRunner().invoke(
         extract.app,
         ["--character", "   ", "--out", str(tmp_path)],
+        color=False,
     )
 
     assert result.exit_code != 0
@@ -148,6 +149,7 @@ def test_cli_rejects_blank_out(
     result = CliRunner().invoke(
         extract.app,
         ["--character", "alice", "--out", "   "],
+        color=False,
     )
 
     assert result.exit_code != 0
