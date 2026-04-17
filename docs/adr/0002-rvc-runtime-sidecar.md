@@ -122,6 +122,13 @@ Follow-up work:
   production sign-off.
 - Add `tests/engine/backends/test_rvc_sidecar.py`, marked with both `gpu` and
   `integration`, to verify the Gradio sidecar contract:
+  - adapter initialization sends a short readiness sample to `/infer_convert`
+    before the adapter is marked ready;
+  - startup health-check connection and timeout failures follow the fixed retry
+    contract: exactly 3 attempts, 1500ms request timeout, 500ms then 1000ms
+    backoff, and no jitter, then `BackendUnavailableError`;
+  - startup health-check protocol errors or invalid response shapes immediately
+    raise `BackendUnavailableError` without retry;
   - successful `predict(..., api_name="/infer_convert")` returns the expected
     converted-audio response shape;
   - `gradio_client` connection failure maps to `BackendUnavailableError`;
