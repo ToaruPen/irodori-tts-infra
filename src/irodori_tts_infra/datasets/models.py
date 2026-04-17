@@ -93,6 +93,9 @@ class ExtractionIndex:
     @classmethod
     def from_json(cls, payload: str) -> Self:
         data = json.loads(payload)
+        if not isinstance(data, dict):
+            msg = "index payload must be a JSON object"
+            raise TypeError(msg)
         raw_characters = data["characters"]
         if not isinstance(raw_characters, dict):
             msg = "characters payload must be a mapping"

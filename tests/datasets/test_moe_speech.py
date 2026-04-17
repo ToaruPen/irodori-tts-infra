@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import struct
 import wave
-from array import array
 from io import BytesIO
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
-from irodori_tts_infra.datasets import moe_speech
 from irodori_tts_infra.datasets.moe_speech import (
     MoeSpeechRecord,
     NsfwSubsetUnavailableError,
@@ -341,16 +339,6 @@ def test_extract_character_rejects_empty_wav_after_resample(tmp_path: Path) -> N
                     _make_empty_wav_bytes(),
                 ),
             ),
-        )
-
-
-def test_resample_samples_rejects_unknown_backend() -> None:
-    with pytest.raises(ValueError, match="backend"):
-        moe_speech._resample_samples(  # noqa: SLF001 - review targets this private helper.
-            array("h", [0, 1]),
-            source_rate=44_100,
-            target_rate=24_000,
-            backend="sinc",
         )
 
 

@@ -148,6 +148,12 @@ def test_extraction_index_from_json_rejects_non_dict_characters() -> None:
         ExtractionIndex.from_json(bad_json)
 
 
+@pytest.mark.parametrize("payload", ["[]", "null"])
+def test_extraction_index_from_json_rejects_non_object_payload(payload: str) -> None:
+    with pytest.raises(TypeError, match="object"):
+        ExtractionIndex.from_json(payload)
+
+
 @pytest.mark.parametrize("include_nsfw", ["false", "true", 0, 1, None])
 def test_extraction_index_from_json_rejects_non_bool_include_nsfw(
     include_nsfw: object,

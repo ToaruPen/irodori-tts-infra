@@ -34,7 +34,6 @@ DEFAULT_DATASET_REPO = "litagin/moe-speech"
 DEFAULT_MAX_BYTES = 1_073_741_824
 DEFAULT_OUTPUT_SAMPLE_RATE = 24_000
 PCM16_SAMPLE_WIDTH_BYTES = 2
-RESAMPLE_BACKEND_LINEAR = "linear"
 
 
 class DatasetExtractionError(RuntimeError):
@@ -185,7 +184,7 @@ def stream_character_records(
 
 def _build_output_wav(wav_bytes: bytes, *, sample_rate: int) -> tuple[bytes, float]:
     source_rate, samples = _read_mono_pcm16_samples(wav_bytes)
-    resampled = _resample_samples(samples, source_rate=source_rate, target_rate=sample_rate)
+    resampled = _resample_samples_linear(samples, source_rate=source_rate, target_rate=sample_rate)
     duration_s = len(resampled) / sample_rate
     if duration_s <= 0.0:
         msg = "moe-speech clips must have positive duration"
@@ -219,19 +218,6 @@ def _read_mono_pcm16_samples(wav_bytes: bytes) -> tuple[int, array[int]]:
     if sys.byteorder != "little":
         samples.byteswap()
     return sample_rate, samples
-
-
-def _resample_samples(
-    samples: array[int],
-    *,
-    source_rate: int,
-    target_rate: int,
-    backend: str = RESAMPLE_BACKEND_LINEAR,
-) -> array[int]:
-    if backend != RESAMPLE_BACKEND_LINEAR:
-        msg = f"unsupported resampling backend: {backend}"
-        raise ValueError(msg)
-    return _resample_samples_linear(samples, source_rate=source_rate, target_rate=target_rate)
 
 
 def _resample_samples_linear(
