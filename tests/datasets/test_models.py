@@ -134,6 +134,8 @@ def test_extraction_index_from_json_rejects_non_dict_characters() -> None:
     with pytest.raises(TypeError, match="mapping"):
         ExtractionIndex.from_json(bad_json)
 
+
+def test_extraction_index_rejects_blank_character_name() -> None:
     with pytest.raises(ValueError, match="character"):
         ExtractionIndex(
             dataset="litagin/moe-speech",

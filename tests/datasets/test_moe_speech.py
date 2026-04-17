@@ -76,6 +76,24 @@ def test_extract_character_filters_and_orders_by_character(tmp_path: Path) -> No
     assert not (tmp_path / "bob_000.wav").exists()
 
 
+def test_extract_character_returns_empty_index_when_no_records_match(tmp_path: Path) -> None:
+    records = (
+        MoeSpeechRecord("data/bob/wav/bob_000.wav", _make_wav_bytes()),
+        MoeSpeechRecord("data/carol/wav/carol_000.wav", _make_wav_bytes()),
+    )
+
+    index = extract_character_dataset(
+        character="alice",
+        out_dir=tmp_path,
+        records=records,
+    )
+
+    assert index.characters["alice"] == ()
+    assert index.total_bytes == 0
+    assert index.total_duration_s == pytest.approx(0.0)
+    assert not any(tmp_path.glob("*.wav"))
+
+
 def test_extract_character_tracks_duration_bytes_and_resamples(tmp_path: Path) -> None:
     index = extract_character_dataset(
         character="alice",
