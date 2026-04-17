@@ -249,6 +249,21 @@ def test_factory_maps_transport_errors(error_cls: type[Exception]) -> None:
     assert exc_info.value.__cause__ is error
 
 
+def test_factory_returns_converter_that_warms_up() -> None:
+    clients: list[FakeRVCClient] = []
+
+    def client_factory(**_kwargs: object) -> FakeRVCClient:
+        client = FakeRVCClient()
+        clients.append(client)
+        return client
+
+    backend = create_rvc_backend(sidecar_settings(), client_factory=client_factory)
+
+    assert isinstance(backend, RVCConverter)
+    backend.warm_up()
+    assert clients[0].view_api_count == 1
+
+
 @pytest.mark.parametrize("error_cls", [ConnectionError, TimeoutError])
 def test_convert_maps_transport_errors_and_cleans_temp_input(
     error_cls: type[Exception],
@@ -291,11 +306,17 @@ def test_convert_maps_profile_load_error_and_cleans_temp_input(
         (("Success", (None, None)), "Unexpected RVC response shape"),
     ],
 )
-def test_convert_rejects_unexpected_response_shape(response: object, match: str) -> None:
-    backend = make_backend(FakeRVCClient(convert_result=response))
+def test_convert_rejects_unexpected_response_shape(
+    response: object,
+    match: str,
+    tmp_path: Path,
+) -> None:
+    backend = make_backend(FakeRVCClient(convert_result=response), temp_wav_dir=tmp_path)
 
     with pytest.raises(BackendUnavailableError, match=match):
         backend.convert(input_audio(), profile=profile())
+
+    assert not any(tmp_path.glob("*.wav"))
 
 
 def test_convert_preserves_nested_audio_array_order() -> None:
