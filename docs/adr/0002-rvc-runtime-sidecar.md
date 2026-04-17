@@ -124,13 +124,17 @@ Follow-up work:
   `integration`, to verify the Gradio sidecar contract:
   - adapter initialization sends a short readiness sample to `/infer_convert`
     before the adapter is marked ready;
+  - requests made while startup health checks are still running immediately raise
+    `BackendUnavailableError` until the readiness sample succeeds;
   - startup health-check connection and timeout failures follow the fixed retry
     contract: exactly 3 attempts, 1500ms request timeout, 500ms then 1000ms
     backoff, and no jitter, then `BackendUnavailableError`;
   - startup health-check protocol errors or invalid response shapes immediately
     raise `BackendUnavailableError` without retry;
   - successful `predict(..., api_name="/infer_convert")` returns the expected
-    converted-audio response shape;
+    converted-audio response shape and decodable WAV or PCM audio at the
+    configured sample rate, configured channel count, and at least 100ms
+    duration;
   - `gradio_client` connection failure maps to `BackendUnavailableError`;
   - HTTP timeout maps to `BackendUnavailableError`;
   - calls made after the sidecar stops map to `BackendUnavailableError`;
@@ -220,10 +224,18 @@ style required by `src/irodori_tts_infra/engine/backends/irodori.py`.
 - `IRODORI_RVC_SIDECAR_URL` is the configured sidecar base URL. The adapter must
   use that URL when constructing `gradio_client.Client`.
 - During adapter startup, the RVC adapter must verify sidecar readiness by
-  sending a short health sample to `/infer_convert`. Connection and timeout
-  failures use the fixed retry contract below. A protocol error or invalid
-  response shape is non-retryable and immediately raises
-  `BackendUnavailableError`.
+  sending a short health sample to `/infer_convert` at
+  `IRODORI_RVC_SIDECAR_URL`. The sample must be deterministic valid audio: WAV
+  or PCM, mono, 16-bit, 16kHz, 100ms to 500ms duration, and 1KiB to 128KiB.
+  Connection and timeout failures use the fixed retry contract below. A
+  protocol error, invalid response shape, partial response, or undecodable audio
+  response is non-retryable and immediately raises `BackendUnavailableError`.
+- The adapter starts in a not-ready state and remains not ready until the
+  `/infer_convert` health sample succeeds. Any runtime conversion request
+  received while not ready, including while startup health-check retries are in
+  progress, must immediately raise `BackendUnavailableError`. After the health
+  sample succeeds, the adapter transitions to ready and may serve runtime
+  conversion requests.
 - Runtime calls must distinguish transient network blips from persistent
   unavailability. Startup health checks and runtime calls use the same fixed
   retry contract for connection and timeout failures: 3 attempts total,
