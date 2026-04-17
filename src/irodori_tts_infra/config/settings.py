@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
-from pydantic import Field, field_validator
+from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Port = Annotated[int, Field(ge=1, le=65_535)]
@@ -13,6 +13,7 @@ PositiveFloat = Annotated[float, Field(gt=0.0)]
 DeviceName = Literal["cuda", "cpu", "mps"]
 PrecisionName = Literal["bf16", "fp32", "fp16"]
 DecodeMode = Literal["batch", "sequential"]
+DEFAULT_RVC_SIDECAR_URL = "http://localhost:7865"
 
 
 class ClientSettings(BaseSettings):
@@ -63,3 +64,12 @@ class PathSettings(BaseSettings):
             msg = "temp_wav_dir must not be blank"
             raise ValueError(msg)
         return value
+
+
+class RVCSidecarSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="IRODORI_RVC_SIDECAR_", extra="forbid")
+
+    url: AnyHttpUrl = cast("AnyHttpUrl", DEFAULT_RVC_SIDECAR_URL)
+    api_name: str = Field(default="/infer_convert", min_length=1, pattern=r"^/.*$")
+    connect_timeout_seconds: PositiveFloat = 10.0
+    convert_timeout_seconds: PositiveFloat = 120.0
