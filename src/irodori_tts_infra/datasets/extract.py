@@ -49,7 +49,7 @@ def main(
             "--include-nsfw/--no-include-nsfw",
             help="Allow extraction from the gated not-for-all-audiences moe-speech dataset.",
         ),
-    ] = True,
+    ] = False,
 ) -> None:
     character = character.strip() if character is not None else None
     out = str(out).strip() if out is not None else None

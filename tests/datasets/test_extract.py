@@ -82,7 +82,7 @@ def test_cli_reports_unavailable_non_nsfw_subset(
 
     result = CliRunner().invoke(
         extract.app,
-        ["--character", "alice", "--out", str(tmp_path), "--no-include-nsfw"],
+        ["--character", "alice", "--out", str(tmp_path)],
     )
 
     assert result.exit_code != 0

@@ -46,6 +46,12 @@ def test_extracted_clip_rejects_negative_duration() -> None:
         ExtractedClip(path="alice_000.wav", duration_s=-0.1)
 
 
+@pytest.mark.parametrize("duration_s", [float("nan"), float("inf")])
+def test_extracted_clip_rejects_non_finite_duration(duration_s: float) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        ExtractedClip(path="alice_000.wav", duration_s=duration_s)
+
+
 def test_extracted_clip_rejects_blank_path() -> None:
     with pytest.raises(ValueError, match="blank"):
         ExtractedClip(path="   ", duration_s=1.0)
@@ -84,6 +90,11 @@ def test_extracted_clip_from_json_dict_rejects_non_numeric_duration(
 ) -> None:
     with pytest.raises(TypeError, match="duration_s"):
         ExtractedClip.from_json_dict({"path": "alice_000.wav", "duration_s": duration_s})
+
+
+def test_extracted_clip_from_json_dict_rejects_non_finite_duration() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        ExtractedClip.from_json_dict({"path": "alice_000.wav", "duration_s": float("nan")})
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +147,54 @@ def test_extraction_index_rejects_negative_total_duration() -> None:
             total_bytes=0,
             total_duration_s=-0.1,
             characters={},
+        )
+
+
+def test_extraction_index_rejects_non_finite_total_duration() -> None:
+    with pytest.raises(ValueError, match="total_duration_s"):
+        ExtractionIndex(
+            dataset="litagin/moe-speech",
+            sample_rate=24_000,
+            include_nsfw=True,
+            total_bytes=0,
+            total_duration_s=float("inf"),
+            characters={},
+        )
+
+
+def test_extraction_index_rejects_non_bool_include_nsfw() -> None:
+    with pytest.raises(TypeError, match="include_nsfw"):
+        ExtractionIndex(
+            dataset="litagin/moe-speech",
+            sample_rate=24_000,
+            include_nsfw="false",  # type: ignore[arg-type]
+            total_bytes=0,
+            total_duration_s=0.0,
+            characters={},
+        )
+
+
+def test_extraction_index_rejects_non_iterable_character_clips() -> None:
+    with pytest.raises(TypeError, match="iterable"):
+        ExtractionIndex(
+            dataset="litagin/moe-speech",
+            sample_rate=24_000,
+            include_nsfw=True,
+            total_bytes=0,
+            total_duration_s=0.0,
+            characters={"alice": object()},  # type: ignore[dict-item]
+        )
+
+
+def test_extraction_index_rejects_non_clip_character_values() -> None:
+    with pytest.raises(TypeError, match="ExtractedClip"):
+        ExtractionIndex(
+            dataset="litagin/moe-speech",
+            sample_rate=24_000,
+            include_nsfw=True,
+            total_bytes=0,
+            total_duration_s=0.0,
+            characters={"alice": ("oops",)},  # type: ignore[dict-item]
         )
 
 

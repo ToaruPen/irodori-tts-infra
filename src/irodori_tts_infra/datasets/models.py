@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+from collections.abc import Iterable as IterableABC
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Self
@@ -21,7 +23,7 @@ class ExtractedClip:
         if not self.path.strip():
             msg = "clip path must not be blank"
             raise ValueError(msg)
-        if self.duration_s <= 0:
+        if not math.isfinite(self.duration_s) or self.duration_s <= 0:
             msg = "clip duration must be positive"
             raise ValueError(msg)
 
@@ -46,6 +48,10 @@ class ExtractionIndex:
     characters: Mapping[str, tuple[ExtractedClip, ...]]
 
     def __post_init__(self) -> None:
+        include_nsfw: object = self.include_nsfw
+        if not isinstance(include_nsfw, bool):
+            msg = "include_nsfw must be a boolean"
+            raise TypeError(msg)
         if not self.dataset.strip():
             msg = "dataset must not be blank"
             raise ValueError(msg)
@@ -55,7 +61,7 @@ class ExtractionIndex:
         if self.total_bytes < 0:
             msg = "total_bytes must be non-negative"
             raise ValueError(msg)
-        if self.total_duration_s < 0:
+        if not math.isfinite(self.total_duration_s) or self.total_duration_s < 0:
             msg = "total_duration_s must be non-negative"
             raise ValueError(msg)
 
@@ -64,7 +70,17 @@ class ExtractionIndex:
             if not character.strip():
                 msg = "character keys must not be blank"
                 raise ValueError(msg)
-            normalized[character] = tuple(clips)
+            raw_clips: object = clips
+            if not isinstance(raw_clips, IterableABC):
+                msg = "character clip values must be iterable"
+                raise TypeError(msg)
+            normalized_clips: list[ExtractedClip] = []
+            for clip in raw_clips:
+                if not isinstance(clip, ExtractedClip):
+                    msg = "character clip values must contain only ExtractedClip instances"
+                    raise TypeError(msg)
+                normalized_clips.append(clip)
+            normalized[character] = tuple(normalized_clips)
         object.__setattr__(self, "characters", MappingProxyType(normalized))
 
     @property
