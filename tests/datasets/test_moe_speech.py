@@ -33,7 +33,8 @@ def _make_wav_bytes(
     sample_width: int = 2,
 ) -> bytes:
     frame_count = max(1, round(sample_rate * seconds))
-    silent_frame = (0).to_bytes(sample_width, byteorder="little", signed=False)
+    signed = sample_width > 1
+    silent_frame = (0).to_bytes(sample_width, byteorder="little", signed=signed)
     frame_bytes = silent_frame * frame_count * channels
     with BytesIO() as buffer:
         with wave.open(buffer, "wb") as wav_file:
@@ -90,7 +91,7 @@ def test_extract_character_returns_empty_index_when_no_records_match(tmp_path: P
 
     assert index.characters["alice"] == ()
     assert index.total_bytes == 0
-    assert index.total_duration_s == pytest.approx(0.0)
+    assert index.total_duration_s == 0.0  # noqa: RUF069 - exact zero is the behavior under test.
     assert not any(tmp_path.glob("*.wav"))
 
 
@@ -148,6 +149,16 @@ def test_extract_character_rejects_out_of_range_sample_rate(tmp_path: Path) -> N
             character="alice",
             out_dir=tmp_path,
             sample_rate=8_000,
+            records=(),
+        )
+
+
+def test_extract_character_rejects_sample_rate_above_maximum(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="between"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            sample_rate=50_000,
             records=(),
         )
 
