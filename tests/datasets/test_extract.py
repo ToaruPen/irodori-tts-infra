@@ -128,7 +128,6 @@ def test_cli_rejects_blank_character(
     )
 
     assert result.exit_code != 0
-    assert "--character" in result.output
     assert called is False
 
 
@@ -151,7 +150,6 @@ def test_cli_rejects_blank_out(
     )
 
     assert result.exit_code != 0
-    assert "--out" in result.output
     assert called is False
 
 
@@ -161,6 +159,12 @@ def test_main_requires_character_and_out_options(tmp_path: Path) -> None:
 
     with pytest.raises(typer.BadParameter, match="--out is required"):
         extract.main(character="alice", out=None)
+
+    with pytest.raises(typer.BadParameter, match="--character is required"):
+        extract.main(character="   ", out=str(tmp_path))
+
+    with pytest.raises(typer.BadParameter, match="--out is required"):
+        extract.main(character="alice", out="   ")
 
 
 def test_cli_help_shows_usage() -> None:
