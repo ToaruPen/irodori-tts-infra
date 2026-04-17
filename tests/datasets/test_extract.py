@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,6 +15,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain_output(output: str) -> str:
+    return ANSI_RE.sub("", output)
 
 
 def test_cli_runs_extraction_with_expected_arguments(
@@ -129,7 +135,7 @@ def test_cli_rejects_blank_character(
     )
 
     assert result.exit_code != 0
-    assert "--character is required" in result.output
+    assert "--character is required" in _plain_output(result.output)
     assert called is False
 
 
@@ -153,7 +159,7 @@ def test_cli_rejects_blank_out(
     )
 
     assert result.exit_code != 0
-    assert "--out is required" in result.output
+    assert "--out is required" in _plain_output(result.output)
     assert called is False
 
 
