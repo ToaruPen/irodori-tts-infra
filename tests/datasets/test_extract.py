@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from irodori_tts_infra.datasets import extract
@@ -89,14 +90,12 @@ def test_cli_rejects_invalid_sample_rate(tmp_path: Path) -> None:
     assert "16000<=x<=48000" in result.output
 
 
-def test_cli_rejects_missing_required_options(tmp_path: Path) -> None:
-    missing_character = CliRunner().invoke(extract.app, ["--out", str(tmp_path)])
-    missing_out = CliRunner().invoke(extract.app, ["--character", "alice"])
+def test_main_requires_character_and_out_options(tmp_path: Path) -> None:
+    with pytest.raises(typer.BadParameter, match="--character is required"):
+        extract.main(character=None, out=tmp_path)
 
-    assert missing_character.exit_code != 0
-    assert "--character" in missing_character.output
-    assert missing_out.exit_code != 0
-    assert "--out" in missing_out.output
+    with pytest.raises(typer.BadParameter, match="--out is required"):
+        extract.main(character="alice", out=None)
 
 
 def test_cli_help_shows_usage() -> None:
