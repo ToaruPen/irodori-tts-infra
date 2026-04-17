@@ -89,6 +89,16 @@ def test_cli_rejects_invalid_sample_rate(tmp_path: Path) -> None:
     assert "16000<=x<=48000" in result.output
 
 
+def test_cli_rejects_missing_required_options(tmp_path: Path) -> None:
+    missing_character = CliRunner().invoke(extract.app, ["--out", str(tmp_path)])
+    missing_out = CliRunner().invoke(extract.app, ["--character", "alice"])
+
+    assert missing_character.exit_code != 0
+    assert "--character is required" in missing_character.output
+    assert missing_out.exit_code != 0
+    assert "--out is required" in missing_out.output
+
+
 def test_cli_help_shows_usage() -> None:
     result = CliRunner().invoke(extract.app, ["--help"])
 

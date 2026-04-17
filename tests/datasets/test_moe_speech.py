@@ -96,7 +96,8 @@ def test_extract_character_tracks_duration_bytes_and_resamples(tmp_path: Path) -
 
 def test_extract_character_stops_before_exceeding_disk_cap(tmp_path: Path) -> None:
     source_bytes = _make_wav_bytes()
-    max_bytes = len(source_bytes) * 2 + 100
+    expected_output_bytes = len(_make_wav_bytes(sample_rate=OUTPUT_SAMPLE_RATE))
+    max_bytes = expected_output_bytes * EXPECTED_EXTRACTED_CLIP_COUNT + 100
     records = tuple(
         MoeSpeechRecord(f"data/alice/wav/alice_{index:03d}.wav", source_bytes) for index in range(3)
     )
@@ -104,7 +105,7 @@ def test_extract_character_stops_before_exceeding_disk_cap(tmp_path: Path) -> No
     index = extract_character_dataset(
         character="alice",
         out_dir=tmp_path,
-        sample_rate=44_100,
+        sample_rate=OUTPUT_SAMPLE_RATE,
         max_bytes=max_bytes,
         records=records,
     )
@@ -112,6 +113,35 @@ def test_extract_character_stops_before_exceeding_disk_cap(tmp_path: Path) -> No
     assert len(index.characters["alice"]) == EXPECTED_EXTRACTED_CLIP_COUNT
     assert index.total_bytes <= max_bytes
     assert not (tmp_path / "alice_002.wav").exists()
+
+
+def test_extract_character_rejects_blank_character(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="blank"):
+        extract_character_dataset(
+            character="   ",
+            out_dir=tmp_path,
+            records=(),
+        )
+
+
+def test_extract_character_rejects_out_of_range_sample_rate(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="between"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            sample_rate=8_000,
+            records=(),
+        )
+
+
+def test_extract_character_rejects_non_positive_max_bytes(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        extract_character_dataset(
+            character="alice",
+            out_dir=tmp_path,
+            max_bytes=0,
+            records=(),
+        )
 
 
 def test_extract_character_rejects_nsfw_opt_out(tmp_path: Path) -> None:

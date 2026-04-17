@@ -41,7 +41,7 @@ def test_extracted_clip_requires_positive_duration() -> None:
         ExtractedClip(path="alice_000.wav", duration_s=0)
 
 
-def test_extracted_clip_rejects_zero_duration() -> None:
+def test_extracted_clip_rejects_negative_duration() -> None:
     with pytest.raises(ValueError, match="positive"):
         ExtractedClip(path="alice_000.wav", duration_s=-0.1)
 

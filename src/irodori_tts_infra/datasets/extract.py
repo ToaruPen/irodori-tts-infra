@@ -75,7 +75,7 @@ def main(
             param_hint="--include-nsfw/--no-include-nsfw",
         ) from exc
 
-    clip_count = len(index.characters.get(character.strip(), ()))
+    clip_count = sum(len(clips) for clips in index.characters.values())
     typer.echo(f"Wrote {clip_count} clip(s) and index.json to {out}")
 
 

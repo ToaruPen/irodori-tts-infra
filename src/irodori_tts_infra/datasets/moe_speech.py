@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
-from huggingface_hub import hf_hub_download, list_repo_tree
 
 from irodori_tts_infra.datasets.models import ExtractedClip, ExtractionIndex
 
@@ -292,4 +291,6 @@ def _entry_path(entry: object) -> str:
 
 
 def _load_huggingface_helpers() -> tuple[Callable[..., Any], Callable[..., str]]:
+    from huggingface_hub import hf_hub_download, list_repo_tree  # noqa: PLC0415
+
     return list_repo_tree, hf_hub_download
