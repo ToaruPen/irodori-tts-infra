@@ -235,5 +235,5 @@ prototype arrays in private artifact storage.
 - [ADR 0001: Irodori Runtime Access Pattern](../adr/0001-irodori-runtime-access.md)
 - [Issue #21](https://github.com/ToaruPen/irodori-tts-infra/issues/21)
 - [RVC architecture and quality gates](../irodori-rvc-architecture.md)
-- `docs/datasets/extraction.md` from issue #21 sub-task 2a / PR #26
+- [Dataset extraction SOP](../datasets/extraction.md) from issue #21 sub-task 2a / PR #26
 - [Windows GPU deployment](windows.md)

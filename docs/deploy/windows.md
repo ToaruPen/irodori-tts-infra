@@ -89,4 +89,4 @@ command manually for the full error output.
 
 ## RVC Training
 
-See `docs/deploy/rvc-training.md` for per-character RVC model training.
+See the [RVC training SOP](rvc-training.md) for per-character RVC model training.
