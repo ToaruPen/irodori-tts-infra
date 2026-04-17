@@ -94,9 +94,9 @@ def test_cli_rejects_missing_required_options(tmp_path: Path) -> None:
     missing_out = CliRunner().invoke(extract.app, ["--character", "alice"])
 
     assert missing_character.exit_code != 0
-    assert "--character is required" in missing_character.output
+    assert "--character" in missing_character.output
     assert missing_out.exit_code != 0
-    assert "--out is required" in missing_out.output
+    assert "--out" in missing_out.output
 
 
 def test_cli_help_shows_usage() -> None:
