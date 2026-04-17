@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import re
 import struct
 import sys
@@ -233,6 +234,44 @@ def _resample_samples_linear(
     if output_length == 1:
         return array("h", [samples[0]])
 
+    try:
+        return _resample_samples_linear_numpy(
+            samples,
+            source_rate=source_rate,
+            target_rate=target_rate,
+            output_length=output_length,
+        )
+    except ModuleNotFoundError:
+        return _resample_samples_linear_python(
+            samples,
+            source_rate=source_rate,
+            target_rate=target_rate,
+            output_length=output_length,
+        )
+
+
+def _resample_samples_linear_numpy(
+    samples: array[int],
+    *,
+    source_rate: int,
+    target_rate: int,
+    output_length: int,
+) -> array[int]:
+    numpy: Any = importlib.import_module("numpy")
+    source_positions = numpy.arange(output_length) * source_rate / target_rate
+    source_indices = numpy.arange(len(samples))
+    interpolated = numpy.interp(source_positions, source_indices, numpy.asarray(samples))
+    clipped = numpy.clip(numpy.rint(interpolated), -32_768, 32_767).astype(numpy.int16)
+    return array("h", clipped.tolist())
+
+
+def _resample_samples_linear_python(
+    samples: array[int],
+    *,
+    source_rate: int,
+    target_rate: int,
+    output_length: int,
+) -> array[int]:
     resampled = array("h", [0]) * output_length
     for index in range(output_length):
         source_position = index * source_rate / target_rate

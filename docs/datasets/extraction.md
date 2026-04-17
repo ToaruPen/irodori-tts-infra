@@ -75,7 +75,3 @@ If you need a smaller training set:
 | HuggingFace auth failure | The dataset is manually gated | Accept the dataset terms on HuggingFace and authenticate before running the CLI |
 | `--no-include-nsfw` fails | moe-speech has no published clean subset | Re-run with `--include-nsfw` or use a different dataset |
 | Unsupported audio format error | A clip was not mono 16-bit WAV as expected | Inspect the offending source file; the extractor only writes mono 16-bit WAV output |
-
-## Future JEV2 hook
-
-The current implementation keeps the extraction path centered on a single record iterator contract. A future JEV2 fallback can plug into that seam once there is a concrete need for alternate dataset coverage or clip-level NSFW filtering.

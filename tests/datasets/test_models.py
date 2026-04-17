@@ -58,7 +58,7 @@ def test_extracted_clip_rejects_blank_path() -> None:
 
 
 @pytest.mark.parametrize("path", ["", None])
-def test_extracted_clip_rejects_non_empty_string_path(path: object) -> None:
+def test_extracted_clip_rejects_empty_or_none_path(path: object) -> None:
     with pytest.raises(ValueError, match="non-empty string"):
         ExtractedClip(path=path, duration_s=1.0)  # type: ignore[arg-type]
 
