@@ -114,7 +114,12 @@ class RVCConverter:
             response = self._predict_convert(temp_path, profile)
         except BackendUnavailableError:
             raise
-        except _predict_errors() as exc:
+        except _client_errors() as exc:
+            msg = "RVC conversion failed"
+            raise BackendUnavailableError(msg) from exc
+        except ValueError as exc:
+            if not _is_gradio_none_return(exc):
+                raise
             msg = "RVC conversion failed"
             raise BackendUnavailableError(msg) from exc
         finally:
@@ -339,8 +344,11 @@ def _client_errors() -> tuple[type[BaseException], ...]:
     )
 
 
-def _predict_errors() -> tuple[type[BaseException], ...]:
-    return (*_client_errors(), ValueError)
+def _is_gradio_none_return(exc: ValueError) -> bool:
+    # gradio_client raises ValueError("None") when the sidecar function returned None
+    # (protocol-layer failure, not a programmer bug). Gate on this specific shape to
+    # avoid masking unrelated ValueErrors from the adapter or its helpers.
+    return str(exc) == "None" or exc.args == ("None",)
 
 
 def _import_httpx() -> object:

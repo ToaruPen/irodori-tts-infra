@@ -387,6 +387,18 @@ def test_convert_maps_gradio_protocol_value_error(tmp_path: Path) -> None:
     assert not any(tmp_path.glob("*.wav"))
 
 
+def test_convert_does_not_wrap_unrelated_value_error(tmp_path: Path) -> None:
+    client = FakeRVCClient()
+    client.predict_exception = ValueError("programming bug")
+    client.predict_exception_api_name = "/infer_convert"
+    backend = make_backend(client, temp_wav_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="programming bug"):
+        backend.convert(input_audio(), profile=profile())
+
+    assert not any(tmp_path.glob("*.wav"))
+
+
 @pytest.mark.parametrize(
     ("sample", "expected"),
     [
