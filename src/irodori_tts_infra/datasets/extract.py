@@ -84,9 +84,11 @@ def main(
         message = str(exc)
         if include_nsfw:
             message = f"{message} Accept the dataset terms at huggingface.co before retrying."
+            param_hint = None
         else:
             message = f"{message} Retry with --include-nsfw to access the gated dataset."
-        raise typer.BadParameter(message, param_hint="--character") from exc
+            param_hint = "--include-nsfw/--no-include-nsfw"
+        raise typer.BadParameter(message, param_hint=param_hint) from exc
     except HfHubHTTPError as exc:
         raise typer.BadParameter(str(exc)) from exc
     except ValueError as exc:

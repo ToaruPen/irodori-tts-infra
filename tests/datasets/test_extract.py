@@ -26,6 +26,12 @@ def _plain_output(output: str) -> str:
     return ANSI_RE.sub("", output)
 
 
+def _readable_output(output: str) -> str:
+    plain = _plain_output(output)
+    without_box = re.sub(r"[╭╮╰╯─│]", " ", plain)
+    return " ".join(without_box.split())
+
+
 def test_cli_runs_extraction_with_expected_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -94,13 +100,24 @@ def test_cli_reports_unavailable_non_nsfw_subset(
     assert captured["include_nsfw"] is False
 
 
+@pytest.mark.parametrize(
+    ("message", "expected_hint"),
+    [
+        ("character must not be blank", "--character"),
+        ("out_dir must be empty before extraction", "--out"),
+        ("sample_rate must be between 16000 and 48000", "--sample-rate"),
+        ("max_bytes must be positive", "--max-bytes"),
+        ("unsupported moe-speech path: x.wav", None),
+    ],
+)
 def test_cli_reports_validation_value_error_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    message: str,
+    expected_hint: str | None,
 ) -> None:
     def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
-        msg = "character must not be blank"
-        raise ValueError(msg)
+        raise ValueError(message)
 
     monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
 
@@ -111,7 +128,12 @@ def test_cli_reports_validation_value_error_without_traceback(
     )
 
     assert result.exit_code != 0
-    assert "character must not be blank" in _plain_output(result.output)
+    output = _readable_output(result.output)
+    assert message in output
+    if expected_hint is None:
+        assert "Invalid value for" not in output
+    else:
+        assert f"Invalid value for {expected_hint}" in output
     assert "Traceback" not in result.output
 
 
@@ -152,10 +174,36 @@ def test_cli_reports_gated_repo_error_without_traceback(
         color=False,
     )
 
-    output = _plain_output(result.output)
+    output = _readable_output(result.output)
     assert result.exit_code != 0
     assert "gated repo access is required" in output
+    assert "Invalid value for --include-nsfw/--no-include-nsfw" in output
     assert "--include-nsfw" in output
+    assert "Traceback" not in result.output
+
+
+def test_cli_reports_gated_repo_error_with_include_nsfw_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        msg = "gated repo access is required"
+        raise GatedRepoError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(tmp_path), "--include-nsfw"],
+        color=False,
+    )
+
+    output = _readable_output(result.output)
+    assert result.exit_code != 0
+    assert "gated repo access is required" in output
+    assert "Accept the dataset terms at huggingface.co before retrying." in output
+    assert "Invalid value for --include-nsfw" not in output
+    assert "Invalid value for" not in output
     assert "Traceback" not in result.output
 
 
