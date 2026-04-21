@@ -228,6 +228,56 @@ def test_cli_reports_hf_hub_http_error_without_traceback(
     assert "Traceback" not in result.output
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        (
+            ValueError("sample_rate must be between 16000 and 48000"),
+            True,
+            ValueError,
+        ),
+        (
+            UnsupportedAudioFormatError("moe-speech clips must be mono WAV files"),
+            True,
+            UnsupportedAudioFormatError,
+        ),
+        (
+            GatedRepoError("gated repo access is required"),
+            False,
+            GatedRepoError,
+        ),
+        (
+            HfHubHTTPError("401 Client Error: Unauthorized for url"),
+            True,
+            HfHubHTTPError,
+        ),
+        (
+            NsfwSubsetUnavailableError(
+                "litagin/moe-speech does not publish a separate non-NSFW subset",
+            ),
+            False,
+            NsfwSubsetUnavailableError,
+        ),
+    ],
+)
+def test_main_preserves_original_exception_as_cause(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    case: tuple[Exception, bool, type[Exception]],
+) -> None:
+    raised, include_nsfw, expected_cause = case
+
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        raise raised
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    with pytest.raises(typer.BadParameter) as exc_info:
+        extract.main(character="alice", out=str(tmp_path), include_nsfw=include_nsfw)
+
+    assert isinstance(exc_info.value.__cause__, expected_cause)
+
+
 def test_cli_rejects_invalid_sample_rate(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
