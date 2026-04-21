@@ -111,6 +111,34 @@ def test_extracted_clip_from_json_dict_rejects_non_finite_duration() -> None:
         ExtractedClip.from_json_dict({"path": "alice_000.wav", "duration_s": float("nan")})
 
 
+@pytest.mark.parametrize("field", ["path", "duration_s"])
+def test_extracted_clip_from_json_dict_reports_single_missing_field(
+    field: str,
+) -> None:
+    payload = ALICE_CLIP_A.to_json_dict()
+    del payload[field]
+
+    with pytest.raises(TypeError, match=field) as exc_info:
+        ExtractedClip.from_json_dict(payload)
+
+    assert "KeyError" not in str(exc_info.value)
+
+
+def test_extracted_clip_from_json_dict_reports_multiple_missing_fields() -> None:
+    payload = ALICE_CLIP_A.to_json_dict()
+    del payload["duration_s"]
+    del payload["path"]
+
+    with pytest.raises(TypeError) as exc_info:
+        ExtractedClip.from_json_dict(payload)
+
+    message = str(exc_info.value)
+    assert "path" in message
+    assert "duration_s" in message
+    assert message.index("duration_s") < message.index("path")
+    assert "KeyError" not in message
+
+
 # ---------------------------------------------------------------------------
 # ExtractionIndex validation
 # ---------------------------------------------------------------------------
@@ -363,6 +391,47 @@ def test_extraction_index_from_json_rejects_malformed_character_entries(
 
     with pytest.raises(TypeError, match="alice"):
         ExtractionIndex.from_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "characters",
+        "dataset",
+        "include_nsfw",
+        "sample_rate",
+        "total_bytes",
+        "total_duration_s",
+    ],
+)
+def test_extraction_index_from_json_reports_single_missing_field(
+    field: str,
+) -> None:
+    payload = _make_index().to_json_dict()
+    del payload[field]
+
+    with pytest.raises(TypeError, match=field) as exc_info:
+        ExtractionIndex.from_json(json.dumps(payload))
+
+    assert "KeyError" not in str(exc_info.value)
+
+
+def test_extraction_index_from_json_reports_multiple_missing_fields() -> None:
+    payload = _make_index().to_json_dict()
+    del payload["total_duration_s"]
+    del payload["characters"]
+    del payload["sample_rate"]
+
+    with pytest.raises(TypeError) as exc_info:
+        ExtractionIndex.from_json(json.dumps(payload))
+
+    message = str(exc_info.value)
+    assert "characters" in message
+    assert "sample_rate" in message
+    assert "total_duration_s" in message
+    assert message.index("characters") < message.index("sample_rate")
+    assert message.index("sample_rate") < message.index("total_duration_s")
+    assert "KeyError" not in message
 
 
 def test_extraction_index_rejects_blank_character_name() -> None:
