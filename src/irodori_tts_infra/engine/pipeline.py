@@ -18,9 +18,9 @@ from irodori_tts_infra.voice_bank import resolve_segment_caption
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from irodori_tts_infra.engine.protocols import Synthesizer
+    from irodori_tts_infra.engine.protocols import Synthesizer, VoiceConverter
     from irodori_tts_infra.text.models import Segment
-    from irodori_tts_infra.voice_bank import VoiceProfile
+    from irodori_tts_infra.voice_bank import RVCProfile, VoiceProfile
 
 
 class SynthesisPipeline:
@@ -29,9 +29,11 @@ class SynthesisPipeline:
         synthesizer: Synthesizer,
         voice_profile: VoiceProfile,
         *,
+        voice_converter: VoiceConverter | None = None,
         config: PipelineConfig | None = None,
     ) -> None:
         self._synthesizer = synthesizer
+        self._voice_converter = voice_converter
         self._voice_profile = voice_profile
         self._config = config or PipelineConfig()
         self._semaphore = threading.BoundedSemaphore(self._config.capacity)
@@ -39,6 +41,10 @@ class SynthesisPipeline:
     @property
     def backend(self) -> Synthesizer:
         return self._synthesizer
+
+    @property
+    def voice_converter(self) -> VoiceConverter | None:
+        return self._voice_converter
 
     def plan_segment(self, segment_index: int, segment: Segment) -> SynthesisJob:
         caption = (
@@ -50,6 +56,7 @@ class SynthesisPipeline:
             segment_index=segment_index,
             text=segment.text,
             caption=caption,
+            rvc=self._resolve_rvc(segment),
         )
 
     def synthesize_job(self, job: SynthesisJob) -> SynthesisResult:
@@ -67,6 +74,14 @@ class SynthesisPipeline:
             except Exception as exc:
                 msg = "Backend synthesize failed"
                 raise BackendUnavailableError(msg) from exc
+            if self._voice_converter is not None and job.rvc is not None:
+                try:
+                    audio = self._voice_converter.convert(audio, profile=job.rvc)
+                except EngineError:
+                    raise
+                except Exception as exc:
+                    msg = "Backend voice conversion failed"
+                    raise BackendUnavailableError(msg) from exc
             elapsed_seconds = round(time.perf_counter() - started, 3)
             return SynthesisResult(
                 segment_index=job.segment_index,
@@ -108,6 +123,14 @@ class SynthesisPipeline:
             msg = "No segments submitted to synthesis pipeline"
             raise EmptyBatchError(msg)
         return jobs
+
+    def _resolve_rvc(self, segment: Segment) -> RVCProfile | None:
+        if segment.kind != SegmentKind.DIALOGUE or segment.speaker is None:
+            return None
+        character = self._voice_profile.characters.get(segment.speaker)
+        if character is None:
+            return None
+        return character.rvc
 
     def _acquire_slot(self) -> bool:
         timeout = self._config.acquire_timeout_seconds

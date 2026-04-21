@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from irodori_tts_infra.contracts.synthesis import SynthesisRequest
+
+if TYPE_CHECKING:
+    from irodori_tts_infra.voice_bank.models import RVCProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +24,7 @@ class SynthesisJob:
     cfg_scale_text: float = 3.0
     cfg_scale_caption: float = 3.5
     no_ref: bool = True
+    rvc: RVCProfile | None = None
 
     def to_request(self) -> SynthesisRequest:
         return SynthesisRequest(

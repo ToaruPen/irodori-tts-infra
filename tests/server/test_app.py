@@ -11,12 +11,14 @@ from starlette import status
 from irodori_tts_infra.contracts import MAX_CHUNK_SIZE_BYTES
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.errors import BackendUnavailableError
+from irodori_tts_infra.engine.models import SynthesizedAudio
 from irodori_tts_infra.server.app import create_app
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from irodori_tts_infra.engine.pipeline import SynthesisPipeline
+    from irodori_tts_infra.voice_bank import RVCProfile
 
 pytestmark = pytest.mark.unit
 
@@ -26,11 +28,31 @@ class _WarmableSynthesizer(Protocol):
     close_calls: int
 
 
+class _WarmableConverter(Protocol):
+    warm_up_calls: int
+    close_calls: int
+
+
 class WarmupUnavailableSynthesizer(FakeSynthesizer):
     @staticmethod
     def warm_up() -> None:
         msg = "warmup backend unavailable"
         raise BackendUnavailableError(msg)
+
+
+class WarmupUnavailableConverter:
+    @staticmethod
+    def warm_up() -> None:
+        msg = "converter warmup failed"
+        raise BackendUnavailableError(msg)
+
+    @staticmethod
+    def close() -> None:
+        return
+
+    @staticmethod
+    def convert(audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
+        return SynthesizedAudio(wav_bytes=audio.wav_bytes, sample_rate=profile.sample_rate)
 
 
 def test_create_app_warms_up_and_closes_backend(
@@ -64,6 +86,44 @@ def test_create_app_handles_backend_unavailable_on_warmup(
     assert body["model_loaded"] is False
     assert body["status"] == "degraded"
     assert "warmup backend unavailable" in body["detail"]
+
+
+def test_create_app_warms_up_and_closes_voice_converter(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    warmable_synthesizer: _WarmableSynthesizer,
+    warmable_converter: _WarmableConverter,
+) -> None:
+    app = create_app(
+        pipeline_factory(warmable_synthesizer, voice_converter=warmable_converter),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert warmable_converter.warm_up_calls == 1
+        assert warmable_converter.close_calls == 0
+        assert response.json()["model_loaded"] is True
+
+    assert warmable_converter.close_calls == 1
+    assert warmable_synthesizer.close_calls == 1
+
+
+def test_create_app_handles_converter_unavailable_on_warmup(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(FakeSynthesizer(), voice_converter=WarmupUnavailableConverter()),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/health")
+
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+    assert body["model_loaded"] is False
+    assert body["status"] == "degraded"
+    assert "converter warmup failed" in body["detail"]
 
 
 def test_server_import_is_lightweight() -> None:

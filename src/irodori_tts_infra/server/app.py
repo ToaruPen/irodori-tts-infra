@@ -30,25 +30,30 @@ class _ClosableBackend(Protocol):
 
 def create_app(pipeline: SynthesisPipeline) -> FastAPI:
     backend = pipeline.backend
+    voice_converter = pipeline.voice_converter
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if isinstance(backend, _WarmableBackend):
+        app.state.model_loaded = True
+        app.state.health_detail = None
+        for component in (backend, voice_converter):
+            if component is None or not isinstance(component, _WarmableBackend):
+                continue
             try:
-                await asyncio.to_thread(backend.warm_up)
+                await asyncio.to_thread(component.warm_up)
             except BackendUnavailableError as exc:
                 app.state.model_loaded = False
                 app.state.health_detail = str(exc)
-            else:
-                app.state.model_loaded = True
-        else:
-            app.state.model_loaded = True
+                break
 
         try:
             yield
         finally:
-            if isinstance(backend, _ClosableBackend):
-                backend.close()
+            for component in (voice_converter, backend):
+                if component is None:
+                    continue
+                if isinstance(component, _ClosableBackend):
+                    component.close()
 
     app = FastAPI(lifespan=lifespan)
     app.state.pipeline = pipeline
