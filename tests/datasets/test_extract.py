@@ -177,8 +177,9 @@ def test_cli_reports_gated_repo_error_without_traceback(
     output = _readable_output(result.output)
     assert result.exit_code != 0
     assert "gated repo access is required" in output
+    assert "Retry with --include-nsfw to access the gated dataset." in output
+    assert "Accept the dataset terms at huggingface.co before retrying." not in output
     assert "Invalid value for --include-nsfw/--no-include-nsfw" in output
-    assert "--include-nsfw" in output
     assert "Traceback" not in result.output
 
 
@@ -202,7 +203,7 @@ def test_cli_reports_gated_repo_error_with_include_nsfw_without_traceback(
     assert result.exit_code != 0
     assert "gated repo access is required" in output
     assert "Accept the dataset terms at huggingface.co before retrying." in output
-    assert "Invalid value for --include-nsfw" not in output
+    assert "Retry with --include-nsfw to access the gated dataset." not in output
     assert "Invalid value for" not in output
     assert "Traceback" not in result.output
 
@@ -280,6 +281,7 @@ def test_main_preserves_original_exception_as_cause(
     with pytest.raises(typer.BadParameter) as exc_info:
         extract.main(character="alice", out=str(tmp_path), include_nsfw=include_nsfw)
 
+    assert exc_info.value.__cause__ is raised
     assert isinstance(exc_info.value.__cause__, expected_cause)
 
 
