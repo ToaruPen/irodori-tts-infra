@@ -345,10 +345,11 @@ def _client_errors() -> tuple[type[BaseException], ...]:
 
 
 def _is_gradio_none_return(exc: ValueError) -> bool:
-    # gradio_client raises ValueError("None") when the sidecar function returned None
-    # (protocol-layer failure, not a programmer bug). Gate on this specific shape to
-    # avoid masking unrelated ValueErrors from the adapter or its helpers.
-    return str(exc) == "None" or exc.args == ("None",)
+    # gradio_client raises ValueError("None") — a literal string "None" arg — when the
+    # sidecar function returned None (protocol-layer failure, not a programmer bug).
+    # Match on exc.args only so ValueError(None) (the None object, e.g. a bug in adapter
+    # code that accidentally passed None) does not get masked as a sidecar outage.
+    return exc.args == ("None",)
 
 
 def _import_httpx() -> object:
