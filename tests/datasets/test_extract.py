@@ -229,44 +229,49 @@ def test_cli_reports_hf_hub_http_error_without_traceback(
 
 
 @pytest.mark.parametrize(
-    "case",
+    ("raised", "include_nsfw", "expected_cause"),
     [
-        (
+        pytest.param(
             ValueError("sample_rate must be between 16000 and 48000"),
             True,
             ValueError,
+            id="ValueError",
         ),
-        (
+        pytest.param(
             UnsupportedAudioFormatError("moe-speech clips must be mono WAV files"),
             True,
             UnsupportedAudioFormatError,
+            id="UnsupportedAudioFormatError",
         ),
-        (
+        pytest.param(
             GatedRepoError("gated repo access is required"),
             False,
             GatedRepoError,
+            id="GatedRepoError",
         ),
-        (
+        pytest.param(
             HfHubHTTPError("401 Client Error: Unauthorized for url"),
             True,
             HfHubHTTPError,
+            id="HfHubHTTPError",
         ),
-        (
+        pytest.param(
             NsfwSubsetUnavailableError(
                 "litagin/moe-speech does not publish a separate non-NSFW subset",
             ),
             False,
             NsfwSubsetUnavailableError,
+            id="NsfwSubsetUnavailableError",
         ),
     ],
 )
 def test_main_preserves_original_exception_as_cause(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    case: tuple[Exception, bool, type[Exception]],
+    raised: Exception,
+    include_nsfw: bool,  # noqa: FBT001
+    expected_cause: type[Exception],
 ) -> None:
-    raised, include_nsfw, expected_cause = case
-
     def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
         raise raised
 
