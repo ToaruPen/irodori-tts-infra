@@ -373,15 +373,17 @@ def test_convert_warns_when_audio_samples_look_pcm_scaled(
     assert events == [("rvc_sidecar_pcm_sample_out_of_unit_range", {"sample": 2.0})]
 
 
-def test_convert_does_not_wrap_unrelated_value_error(tmp_path: Path) -> None:
+def test_convert_maps_gradio_protocol_value_error(tmp_path: Path) -> None:
     client = FakeRVCClient()
-    client.predict_exception = ValueError("programming bug")
+    client.predict_exception = ValueError("None")
     client.predict_exception_api_name = "/infer_convert"
     backend = make_backend(client, temp_wav_dir=tmp_path)
 
-    with pytest.raises(ValueError, match="programming bug"):
+    with pytest.raises(BackendUnavailableError, match="RVC conversion failed") as exc_info:
         backend.convert(input_audio(), profile=profile())
 
+    assert isinstance(exc_info.value.__cause__, ValueError)
+    assert str(exc_info.value.__cause__) == "None"
     assert not any(tmp_path.glob("*.wav"))
 
 
@@ -403,6 +405,27 @@ def test_convert_applies_pcm16_boundary_values(sample: float, expected: int) -> 
     result = backend.convert(input_audio(), profile=profile())
 
     assert _wav_samples(result.wav_bytes) == [expected]
+
+
+@pytest.mark.parametrize(
+    ("sample", "expected"),
+    [
+        (-1.0, -32_767),
+        (1.0, 32_767),
+        (-1.0001, -1),
+        (1.0001, 1),
+        (0.0, 0),
+        (-32_768.0, -32_768),
+        (32_767.0, 32_767),
+        (-40_000.0, -32_768),
+        (40_000.0, 32_767),
+    ],
+)
+def test_to_pcm16_handles_float_normalized_and_pcm_scaled_samples(
+    sample: float,
+    expected: int,
+) -> None:
+    assert rvc_module._to_pcm16(sample) == expected  # noqa: SLF001 - direct private unit test
 
 
 def test_warm_up_calls_view_api_once() -> None:

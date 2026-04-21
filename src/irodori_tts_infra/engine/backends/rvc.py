@@ -114,7 +114,7 @@ class RVCConverter:
             response = self._predict_convert(temp_path, profile)
         except BackendUnavailableError:
             raise
-        except _client_errors() as exc:
+        except _predict_errors() as exc:
             msg = "RVC conversion failed"
             raise BackendUnavailableError(msg) from exc
         finally:
@@ -306,6 +306,7 @@ def _flatten_audio(audio_array: object, *, _depth: int = 0) -> list[float]:
     raise BackendUnavailableError(msg)
 
 
+# RVC does audio_opt=(audio_opt*max_int16).astype(np.int16); [-1,1] rescales, else PCM clamps.
 def _to_pcm16(sample: float) -> int:
     if not -1.0 <= sample <= 1.0:
         logger.warning("rvc_sidecar_pcm_sample_out_of_unit_range", sample=sample)
@@ -336,6 +337,10 @@ def _client_errors() -> tuple[type[BaseException], ...]:
         OSError,
         cast("type[BaseException]", httpx_module.HTTPError),
     )
+
+
+def _predict_errors() -> tuple[type[BaseException], ...]:
+    return (*_client_errors(), ValueError)
 
 
 def _import_httpx() -> object:
