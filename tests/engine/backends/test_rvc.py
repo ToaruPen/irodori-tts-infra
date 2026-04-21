@@ -373,10 +373,14 @@ def test_convert_warns_when_audio_samples_look_pcm_scaled(
     assert events == [("rvc_sidecar_pcm_sample_out_of_unit_range", {"sample": 2.0})]
 
 
-def test_convert_maps_gradio_protocol_value_error(tmp_path: Path) -> None:
+@pytest.mark.parametrize("api_name", ["/infer_convert", "/infer_change_voice"])
+def test_convert_maps_gradio_protocol_value_error(
+    api_name: str,
+    tmp_path: Path,
+) -> None:
     client = FakeRVCClient()
     client.predict_exception = ValueError("None")
-    client.predict_exception_api_name = "/infer_convert"
+    client.predict_exception_api_name = api_name
     backend = make_backend(client, temp_wav_dir=tmp_path)
 
     with pytest.raises(BackendUnavailableError, match="RVC conversion failed") as exc_info:
