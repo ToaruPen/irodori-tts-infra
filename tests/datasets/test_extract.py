@@ -5,11 +5,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 import typer
+from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
 from typer.testing import CliRunner
 
 from irodori_tts_infra.datasets import extract
 from irodori_tts_infra.datasets.models import ExtractedClip, ExtractionIndex
-from irodori_tts_infra.datasets.moe_speech import NsfwSubsetUnavailableError
+from irodori_tts_infra.datasets.moe_speech import (
+    NsfwSubsetUnavailableError,
+    UnsupportedAudioFormatError,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,6 +24,12 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _plain_output(output: str) -> str:
     return ANSI_RE.sub("", output)
+
+
+def _readable_output(output: str) -> str:
+    plain = _plain_output(output)
+    without_box = re.sub(r"[╭╮╰╯─│]", " ", plain)
+    return " ".join(without_box.split())
 
 
 def test_cli_runs_extraction_with_expected_arguments(
@@ -88,6 +98,191 @@ def test_cli_reports_unavailable_non_nsfw_subset(
     assert result.exit_code != 0
     assert "non-NSFW subset" in result.output
     assert captured["include_nsfw"] is False
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_hint"),
+    [
+        ("character must not be blank", "--character"),
+        ("out_dir must be empty before extraction", "--out"),
+        ("sample_rate must be between 16000 and 48000", "--sample-rate"),
+        ("max_bytes must be positive", "--max-bytes"),
+        ("unsupported moe-speech path: x.wav", None),
+    ],
+)
+def test_cli_reports_validation_value_error_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    message: str,
+    expected_hint: str | None,
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        raise ValueError(message)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(tmp_path), "--include-nsfw"],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    output = _readable_output(result.output)
+    assert message in output
+    if expected_hint is None:
+        assert "Invalid value for" not in output
+    else:
+        assert f"Invalid value for {expected_hint}" in output
+    assert "Traceback" not in result.output
+
+
+def test_cli_reports_unsupported_audio_format_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        msg = "moe-speech clips must be mono WAV files"
+        raise UnsupportedAudioFormatError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(tmp_path), "--include-nsfw"],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    assert "moe-speech clips must be mono WAV files" in _plain_output(result.output)
+    assert "Traceback" not in result.output
+
+
+def test_cli_reports_gated_repo_error_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        msg = "gated repo access is required"
+        raise GatedRepoError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(tmp_path)],
+        color=False,
+    )
+
+    output = _readable_output(result.output)
+    assert result.exit_code != 0
+    assert "gated repo access is required" in output
+    assert "Retry with --include-nsfw to access the gated dataset." in output
+    assert "Accept the dataset terms at huggingface.co before retrying." not in output
+    assert "Invalid value for --include-nsfw/--no-include-nsfw" in output
+    assert "Traceback" not in result.output
+
+
+def test_cli_reports_gated_repo_error_with_include_nsfw_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        msg = "gated repo access is required"
+        raise GatedRepoError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(tmp_path), "--include-nsfw"],
+        color=False,
+    )
+
+    output = _readable_output(result.output)
+    assert result.exit_code != 0
+    assert "gated repo access is required" in output
+    assert "Accept the dataset terms at huggingface.co before retrying." in output
+    assert "Retry with --include-nsfw to access the gated dataset." not in output
+    assert "Invalid value for" not in output
+    assert "Traceback" not in result.output
+
+
+def test_cli_reports_hf_hub_http_error_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        msg = "401 Client Error: Unauthorized for url"
+        raise HfHubHTTPError(msg)
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    result = CliRunner().invoke(
+        extract.app,
+        ["--character", "alice", "--out", str(tmp_path), "--include-nsfw"],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    assert "401 Client Error: Unauthorized for url" in _plain_output(result.output)
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("raised", "include_nsfw", "expected_cause"),
+    [
+        pytest.param(
+            ValueError("sample_rate must be between 16000 and 48000"),
+            True,
+            ValueError,
+            id="ValueError",
+        ),
+        pytest.param(
+            UnsupportedAudioFormatError("moe-speech clips must be mono WAV files"),
+            True,
+            UnsupportedAudioFormatError,
+            id="UnsupportedAudioFormatError",
+        ),
+        pytest.param(
+            GatedRepoError("gated repo access is required"),
+            False,
+            GatedRepoError,
+            id="GatedRepoError",
+        ),
+        pytest.param(
+            HfHubHTTPError("401 Client Error: Unauthorized for url"),
+            True,
+            HfHubHTTPError,
+            id="HfHubHTTPError",
+        ),
+        pytest.param(
+            NsfwSubsetUnavailableError(
+                "litagin/moe-speech does not publish a separate non-NSFW subset",
+            ),
+            False,
+            NsfwSubsetUnavailableError,
+            id="NsfwSubsetUnavailableError",
+        ),
+    ],
+)
+def test_main_preserves_original_exception_as_cause(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    raised: Exception,
+    include_nsfw: bool,  # noqa: FBT001
+    expected_cause: type[Exception],
+) -> None:
+    def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
+        raise raised
+
+    monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
+
+    with pytest.raises(typer.BadParameter) as exc_info:
+        extract.main(character="alice", out=str(tmp_path), include_nsfw=include_nsfw)
+
+    assert exc_info.value.__cause__ is raised
+    assert isinstance(exc_info.value.__cause__, expected_cause)
 
 
 def test_cli_rejects_invalid_sample_rate(

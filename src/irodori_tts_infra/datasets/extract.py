@@ -4,12 +4,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
 
 from irodori_tts_infra.datasets.models import MAX_SAMPLE_RATE, MIN_SAMPLE_RATE
 from irodori_tts_infra.datasets.moe_speech import (
     DEFAULT_MAX_BYTES,
     DEFAULT_OUTPUT_SAMPLE_RATE,
     NsfwSubsetUnavailableError,
+    UnsupportedAudioFormatError,
     extract_character_dataset,
 )
 
@@ -76,6 +78,25 @@ def main(
             str(exc),
             param_hint="--include-nsfw/--no-include-nsfw",
         ) from exc
+    except UnsupportedAudioFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except GatedRepoError as exc:
+        message = str(exc)
+        if include_nsfw:
+            message = f"{message} Accept the dataset terms at huggingface.co before retrying."
+            param_hint = None
+        else:
+            message = f"{message} Retry with --include-nsfw to access the gated dataset."
+            param_hint = "--include-nsfw/--no-include-nsfw"
+        raise typer.BadParameter(message, param_hint=param_hint) from exc
+    except HfHubHTTPError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ValueError as exc:
+        message = str(exc)
+        raise typer.BadParameter(
+            message,
+            param_hint=_value_error_param_hint(message),
+        ) from exc
 
     clip_count = sum(len(clips) for clips in index.characters.values())
     typer.echo(f"Wrote {clip_count} clip(s) and index.json to {out_path}")
@@ -99,6 +120,20 @@ def _validate_out_path(out_path: Path) -> None:
     if any(out_path.iterdir()):
         msg = "out_dir must be empty before extraction"
         raise typer.BadParameter(msg, param_hint="--out")
+
+
+def _value_error_param_hint(message: str) -> str | None:
+    lower_message = message.lower()
+    hints = (
+        ("--character", ("character", "repo id")),
+        ("--out", ("out_dir", "output directory")),
+        ("--sample-rate", ("sample_rate", "sample rate")),
+        ("--max-bytes", ("max_bytes", "max bytes")),
+    )
+    for param_hint, patterns in hints:
+        if any(pattern in lower_message for pattern in patterns):
+            return param_hint
+    return None
 
 
 if __name__ == "__main__":
