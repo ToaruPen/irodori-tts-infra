@@ -391,6 +391,7 @@ def test_convert_maps_gradio_protocol_value_error(
     assert not any(tmp_path.glob("*.wav"))
 
 
+@pytest.mark.parametrize("api_name", ["/infer_convert", "/infer_change_voice"])
 @pytest.mark.parametrize(
     "unrelated",
     [
@@ -400,11 +401,12 @@ def test_convert_maps_gradio_protocol_value_error(
 )
 def test_convert_does_not_wrap_unrelated_value_error(
     unrelated: ValueError,
+    api_name: str,
     tmp_path: Path,
 ) -> None:
     client = FakeRVCClient()
     client.predict_exception = unrelated
-    client.predict_exception_api_name = "/infer_convert"
+    client.predict_exception_api_name = api_name
     backend = make_backend(client, temp_wav_dir=tmp_path)
 
     with pytest.raises(ValueError) as exc_info:
