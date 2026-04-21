@@ -26,6 +26,7 @@ class ExtractedClip:
 
     @classmethod
     def from_json_dict(cls, payload: Mapping[str, Any]) -> Self:
+        _require_keys(payload, ("duration_s", "path"), "ExtractedClip")
         return cls(
             path=_require_str(payload, "path"),
             duration_s=_require_number(payload, "duration_s"),
@@ -102,6 +103,18 @@ class ExtractionIndex:
         if not isinstance(data, dict):
             msg = "index payload must be a JSON object"
             raise TypeError(msg)
+        _require_keys(
+            data,
+            (
+                "characters",
+                "dataset",
+                "include_nsfw",
+                "sample_rate",
+                "total_bytes",
+                "total_duration_s",
+            ),
+            "ExtractionIndex",
+        )
         raw_characters = data["characters"]
         if not isinstance(raw_characters, dict):
             msg = "characters payload must be a mapping"
@@ -216,6 +229,17 @@ def _require_number_value(value: object, key: str) -> float:
         msg = f"{key} must be a number"
         raise TypeError(msg)
     return float(value)
+
+
+def _require_keys(
+    payload: Mapping[str, Any],
+    required_keys: tuple[str, ...],
+    payload_name: str,
+) -> None:
+    missing = sorted(key for key in required_keys if key not in payload)
+    if missing:
+        msg = f"{payload_name} payload missing required fields: {', '.join(missing)}"
+        raise TypeError(msg)
 
 
 def _require_str(payload: Mapping[str, Any], key: str) -> str:
