@@ -76,6 +76,7 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
     smoke_character_name = _smoke_character_name(voice_profile)
 
     backend = None
+    rvc_converter = None
     spy = None
     setup_completed = False
     try:
@@ -105,6 +106,12 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
     finally:
         if spy is not None:
             _close_component("RVC converter", spy.close, setup_completed=setup_completed)
+        elif rvc_converter is not None:
+            _close_component(
+                "RVC converter",
+                rvc_converter.close,
+                setup_completed=setup_completed,
+            )
         if backend is not None:
             _close_component("Irodori backend", backend.close, setup_completed=setup_completed)
 
@@ -145,6 +152,8 @@ def test_phase2_chain_dialogue_uses_rvc_and_narration_bypasses(
     narration_nframes, _ = _decode_wav(narration_result)
     assert dialogue_nframes > 0
     assert narration_nframes > 0
+    assert dialogue_result.elapsed_seconds > 0
+    assert narration_result.elapsed_seconds > 0
 
     assert len(spy.convert_calls) == 1
     expected_profile = voice_profile.characters[smoke_character_name].rvc
@@ -201,6 +210,5 @@ def _smoke_character_name(voice_profile: VoiceProfile) -> str:
 def _decode_wav(result: SynthesisResult) -> tuple[int, int]:
     assert result.wav_bytes.startswith(b"RIFF")
     assert result.wav_bytes[8:12] == b"WAVE"
-    assert result.elapsed_seconds > 0
     with wave.open(io.BytesIO(result.wav_bytes)) as reader:
         return reader.getnframes(), reader.getframerate()
