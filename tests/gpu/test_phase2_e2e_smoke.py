@@ -20,7 +20,9 @@ Run:
 
 from __future__ import annotations
 
+import io
 import os
+import wave
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,7 +48,6 @@ pytestmark = [pytest.mark.gpu, pytest.mark.integration]
 
 EXPECTED_RESULT_COUNT = 2
 MAX_SMOKE_SECONDS = 300
-MIN_WAV_HEADER_BYTES = 44
 
 SmokeSetup = tuple[SynthesisPipeline, "_SpyVoiceConverter", VoiceProfile, str]
 
@@ -80,12 +81,12 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
             rvc_settings = RVCSidecarSettings()
             backend = create_irodori_backend(irodori_settings)
             rvc_converter = create_rvc_backend(rvc_settings)
+            spy = _SpyVoiceConverter(rvc_converter)
             backend.warm_up()
-            rvc_converter.warm_up()
+            spy.warm_up()
         except BackendUnavailableError as exc:
             pytest.skip(f"GPU smoke backend unavailable during setup: {exc}")
 
-        spy = _SpyVoiceConverter(rvc_converter)
         yield (
             SynthesisPipeline(
                 backend,
@@ -99,10 +100,10 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
         )
     finally:
         if spy is not None:
-            with suppress(BackendUnavailableError, OSError):
+            with suppress(BackendUnavailableError):
                 spy.close()
         if backend is not None:
-            with suppress(BackendUnavailableError, OSError):
+            with suppress(BackendUnavailableError):
                 backend.close()
 
 
@@ -120,10 +121,21 @@ def test_phase2_chain_dialogue_uses_rvc_and_narration_bypasses(
     result = pipeline.synthesize_batch([dialogue, narration])
 
     assert len(result.results) == EXPECTED_RESULT_COUNT
-    for item in result.results:
-        _assert_wav_result(item)
+    dialogue_result, narration_result = result.results
+    assert dialogue_result.segment_index == 0
+    assert narration_result.segment_index == 1
+
+    dialogue_nframes, dialogue_sample_rate = _decode_wav(dialogue_result)
+    narration_nframes, _ = _decode_wav(narration_result)
+    assert dialogue_nframes > 0
+    assert narration_nframes > 0
+
     assert len(spy.convert_calls) == 1
-    assert spy.convert_calls[0] is voice_profile.characters[smoke_character_name].rvc
+    expected_profile = voice_profile.characters[smoke_character_name].rvc
+    assert expected_profile is not None
+    assert spy.convert_calls[0] is expected_profile
+    assert dialogue_sample_rate == expected_profile.sample_rate
+
     assert result.total_elapsed_seconds > 0
     assert result.total_elapsed_seconds < MAX_SMOKE_SECONDS
 
@@ -154,7 +166,9 @@ def _smoke_character_name(voice_profile: VoiceProfile) -> str:
     pytest.skip("no trained RVC weights in VOICE_BANK_DIR; run RVC training SOP first")
 
 
-def _assert_wav_result(result: SynthesisResult) -> None:
+def _decode_wav(result: SynthesisResult) -> tuple[int, int]:
     assert result.wav_bytes.startswith(b"RIFF")
-    assert len(result.wav_bytes) >= MIN_WAV_HEADER_BYTES
+    assert result.wav_bytes[8:12] == b"WAVE"
     assert result.elapsed_seconds > 0
+    with wave.open(io.BytesIO(result.wav_bytes)) as reader:
+        return reader.getnframes(), reader.getframerate()
