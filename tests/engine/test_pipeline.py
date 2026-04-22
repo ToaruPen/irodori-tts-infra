@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 CONCURRENT_JOB_COUNT = 5
-CHAINED_JOB_COUNT = 2
 EXPECTED_THIRD_INDEX = 2
 MIN_TIMEOUT_SECONDS = 0.04
 MAX_TIMEOUT_SECONDS = 0.5
@@ -436,6 +435,7 @@ def test_voice_converter_reraises_backend_unavailable_error_unchanged() -> None:
 
     assert exc_info.value is error
     assert exc_info.value.__cause__ is None
+    probe_available_capacity(pipeline)
 
 
 def test_voice_converter_wraps_non_engine_exception() -> None:
@@ -452,6 +452,7 @@ def test_voice_converter_wraps_non_engine_exception() -> None:
         pipeline.synthesize_batch([dialogue()])
 
     assert exc_info.value.__cause__ is error
+    probe_available_capacity(pipeline)
 
 
 def test_capacity_one_serializes_concurrent_jobs_event_driven() -> None:
@@ -479,23 +480,21 @@ def test_capacity_slot_is_held_until_chained_rvc_conversion_finishes() -> None:
         synthesizer,
         voice_profile=profile_with_rvc(),
         voice_converter=converter,
+        config=PipelineConfig(acquire_timeout_seconds=0),
     )
     first, first_results = _run_in_thread(lambda: pipeline.synthesize_batch([dialogue("一")]))
     wait_for_call(synthesizer, 0)
     wait_for_converter_call(converter)
 
-    second, second_results = _run_in_thread(lambda: pipeline.synthesize_batch([dialogue("二")]))
-    time.sleep(TIMING_DELAY_SECONDS)
-
     try:
+        with pytest.raises(BackpressureError, match="capacity"):
+            pipeline.synthesize_batch([dialogue("二")])
         assert len(synthesizer.calls) == 1
     finally:
         converter_release.set()
         _join_thread(first, first_results)
-        _join_thread(second, second_results)
 
-    assert len(synthesizer.calls) == CHAINED_JOB_COUNT
-    assert len(converter.calls) == CHAINED_JOB_COUNT
+    probe_available_capacity(pipeline)
 
 
 def test_semaphore_is_released_after_success() -> None:

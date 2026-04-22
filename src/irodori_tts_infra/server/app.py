@@ -56,7 +56,7 @@ def create_app(pipeline: SynthesisPipeline) -> FastAPI:
                 if component is None or not isinstance(component, _ClosableBackend):
                     continue
                 try:
-                    component.close()
+                    await asyncio.to_thread(component.close)
                 except Exception:
                     _logger.exception(
                         "pipeline component close failed",

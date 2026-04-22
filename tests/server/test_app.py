@@ -108,6 +108,25 @@ def test_create_app_handles_backend_unavailable_on_warmup(
     assert "warmup backend unavailable" in body["detail"]
 
 
+def test_create_app_backend_warmup_failure_skips_converter_warmup(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    warmable_converter: _WarmableConverter,
+) -> None:
+    app = create_app(
+        pipeline_factory(WarmupUnavailableSynthesizer(), voice_converter=warmable_converter),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/health")
+
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+    assert body["model_loaded"] is False
+    assert "warmup backend unavailable" in body["detail"]
+    assert warmable_converter.warm_up_calls == 0
+    assert warmable_converter.close_calls == 1
+
+
 def test_create_app_warms_up_and_closes_voice_converter(
     pipeline_factory: Callable[..., SynthesisPipeline],
     warmable_synthesizer: _WarmableSynthesizer,
