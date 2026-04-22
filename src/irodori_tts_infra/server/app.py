@@ -57,7 +57,7 @@ def create_app(pipeline: SynthesisPipeline) -> FastAPI:
                     continue
                 try:
                     await asyncio.to_thread(component.close)
-                except Exception:
+                except (BackendUnavailableError, OSError):
                     _logger.exception(
                         "pipeline component close failed",
                         component=type(component).__name__,

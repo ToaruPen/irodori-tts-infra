@@ -68,7 +68,7 @@ class CloseFailingConverter:
     def close(self) -> None:
         self.close_calls += 1
         msg = "gradio client died"
-        raise RuntimeError(msg)
+        raise OSError(msg)
 
     @staticmethod
     def convert(audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
@@ -150,9 +150,10 @@ def test_create_app_warms_up_and_closes_voice_converter(
 
 def test_create_app_handles_converter_unavailable_on_warmup(
     pipeline_factory: Callable[..., SynthesisPipeline],
+    warmable_synthesizer: _WarmableSynthesizer,
 ) -> None:
     converter = WarmupUnavailableConverter()
-    app = create_app(pipeline_factory(FakeSynthesizer(), voice_converter=converter))
+    app = create_app(pipeline_factory(warmable_synthesizer, voice_converter=converter))
 
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get("/health")
@@ -162,6 +163,8 @@ def test_create_app_handles_converter_unavailable_on_warmup(
     assert body["model_loaded"] is False
     assert body["status"] == "degraded"
     assert "converter warmup failed" in body["detail"]
+    assert warmable_synthesizer.warm_up_calls == 1
+    assert warmable_synthesizer.close_calls == 1
     assert converter.close_calls == 1
 
 
