@@ -11,6 +11,9 @@ Preconditions:
 - The RVC sidecar is already running.
 - VOICE_BANK_DIR points to a voice bank with voice_bank_rvc.toml and characters.md.
 - At least one character in the voice bank has a populated RVCProfile.
+- SMOKE_SPEAKER selects the character deterministically when the voice bank has
+  more than one RVC-enabled character. With exactly one, the sole character is
+  picked automatically.
 - IRODORI_TTS_RUNTIME_* and IRODORI_RVC_SIDECAR_* environment variables are set
   for the host runtime.
 
@@ -23,7 +26,6 @@ from __future__ import annotations
 import io
 import os
 import wave
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,7 +42,7 @@ from irodori_tts_infra.voice_bank.models import RVCProfile, VoiceProfile
 from irodori_tts_infra.voice_bank.repository import load_voice_profile
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from irodori_tts_infra.contracts.synthesis import SynthesisResult
 
@@ -75,6 +77,7 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
 
     backend = None
     spy = None
+    setup_completed = False
     try:
         try:
             irodori_settings = IrodoriRuntimeSettings()
@@ -84,6 +87,7 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
             spy = _SpyVoiceConverter(rvc_converter)
             backend.warm_up()
             spy.warm_up()
+            setup_completed = True
         except BackendUnavailableError as exc:
             pytest.skip(f"GPU smoke backend unavailable during setup: {exc}")
 
@@ -100,11 +104,23 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
         )
     finally:
         if spy is not None:
-            with suppress(BackendUnavailableError):
-                spy.close()
+            _close_component("RVC converter", spy.close, setup_completed=setup_completed)
         if backend is not None:
-            with suppress(BackendUnavailableError):
-                backend.close()
+            _close_component("Irodori backend", backend.close, setup_completed=setup_completed)
+
+
+def _close_component(
+    label: str,
+    close_fn: Callable[[], None],
+    *,
+    setup_completed: bool,
+) -> None:
+    try:
+        close_fn()
+    except BackendUnavailableError as exc:
+        if setup_completed:
+            msg = f"failed to close {label} during gpu smoke teardown"
+            raise RuntimeError(msg) from exc
 
 
 def test_phase2_chain_dialogue_uses_rvc_and_narration_bypasses(
@@ -160,10 +176,26 @@ def _load_smoke_voice_profile() -> VoiceProfile:
 
 
 def _smoke_character_name(voice_profile: VoiceProfile) -> str:
-    for name, character in voice_profile.characters.items():
-        if character.rvc is not None:
-            return name
-    pytest.skip("no trained RVC weights in VOICE_BANK_DIR; run RVC training SOP first")
+    explicit = os.environ.get("SMOKE_SPEAKER")
+    if explicit is not None:
+        character = voice_profile.characters.get(explicit)
+        if character is None:
+            pytest.skip(f"SMOKE_SPEAKER={explicit!r} is not present in VOICE_BANK_DIR")
+        if character.rvc is None:
+            pytest.skip(f"SMOKE_SPEAKER={explicit!r} has no RVCProfile")
+        return explicit
+
+    rvc_characters = sorted(
+        name for name, character in voice_profile.characters.items() if character.rvc is not None
+    )
+    if not rvc_characters:
+        pytest.skip("no trained RVC weights in VOICE_BANK_DIR; run RVC training SOP first")
+    if len(rvc_characters) > 1:
+        pytest.skip(
+            "multiple RVC-enabled characters in VOICE_BANK_DIR "
+            f"({', '.join(rvc_characters)}); set SMOKE_SPEAKER to choose one"
+        )
+    return rvc_characters[0]
 
 
 def _decode_wav(result: SynthesisResult) -> tuple[int, int]:
