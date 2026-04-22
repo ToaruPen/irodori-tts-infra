@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+import structlog
 from fastapi import FastAPI
 
 from irodori_tts_infra.contracts import MAX_CHUNK_SIZE_BYTES
@@ -11,6 +12,8 @@ from irodori_tts_infra.engine.errors import BackendUnavailableError
 from irodori_tts_infra.server.errors import add_exception_handlers
 from irodori_tts_infra.server.routers.health import router as health_router
 from irodori_tts_infra.server.routers.synthesis import router as synthesis_router
+
+_logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -50,10 +53,15 @@ def create_app(pipeline: SynthesisPipeline) -> FastAPI:
             yield
         finally:
             for component in (voice_converter, backend):
-                if component is None:
+                if component is None or not isinstance(component, _ClosableBackend):
                     continue
-                if isinstance(component, _ClosableBackend):
+                try:
                     component.close()
+                except Exception:
+                    _logger.exception(
+                        "pipeline component close failed",
+                        component=type(component).__name__,
+                    )
 
     app = FastAPI(lifespan=lifespan)
     app.state.pipeline = pipeline

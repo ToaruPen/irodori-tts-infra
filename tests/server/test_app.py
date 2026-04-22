@@ -41,14 +41,34 @@ class WarmupUnavailableSynthesizer(FakeSynthesizer):
 
 
 class WarmupUnavailableConverter:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
     @staticmethod
     def warm_up() -> None:
         msg = "converter warmup failed"
         raise BackendUnavailableError(msg)
 
+    def close(self) -> None:
+        self.close_calls += 1
+
     @staticmethod
-    def close() -> None:
+    def convert(audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
+        return SynthesizedAudio(wav_bytes=audio.wav_bytes, sample_rate=profile.sample_rate)
+
+
+class CloseFailingConverter:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    @staticmethod
+    def warm_up() -> None:
         return
+
+    def close(self) -> None:
+        self.close_calls += 1
+        msg = "gradio client died"
+        raise RuntimeError(msg)
 
     @staticmethod
     def convert(audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
@@ -112,9 +132,8 @@ def test_create_app_warms_up_and_closes_voice_converter(
 def test_create_app_handles_converter_unavailable_on_warmup(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
-    app = create_app(
-        pipeline_factory(FakeSynthesizer(), voice_converter=WarmupUnavailableConverter()),
-    )
+    converter = WarmupUnavailableConverter()
+    app = create_app(pipeline_factory(FakeSynthesizer(), voice_converter=converter))
 
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get("/health")
@@ -124,6 +143,24 @@ def test_create_app_handles_converter_unavailable_on_warmup(
     assert body["model_loaded"] is False
     assert body["status"] == "degraded"
     assert "converter warmup failed" in body["detail"]
+    assert converter.close_calls == 1
+
+
+def test_create_app_close_error_in_converter_does_not_skip_backend_close(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    warmable_synthesizer: _WarmableSynthesizer,
+) -> None:
+    converter = CloseFailingConverter()
+    app = create_app(
+        pipeline_factory(warmable_synthesizer, voice_converter=converter),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+        assert response.status_code == status.HTTP_200_OK
+
+    assert converter.close_calls == 1
+    assert warmable_synthesizer.close_calls == 1
 
 
 def test_server_import_is_lightweight() -> None:

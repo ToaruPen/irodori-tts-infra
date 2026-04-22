@@ -403,6 +403,18 @@ def test_unknown_dialogue_speaker_never_routes_through_rvc() -> None:
     assert converter.calls == []
 
 
+def test_dialogue_with_none_speaker_never_routes_through_rvc() -> None:
+    converter = FakeVoiceConverter()
+    pipeline = make_pipeline(
+        voice_profile=profile_with_rvc(),
+        voice_converter=converter,
+    )
+
+    pipeline.synthesize_batch([dialogue(speaker=None)])
+
+    assert converter.calls == []
+
+
 def test_character_without_rvc_never_routes_through_converter() -> None:
     converter = FakeVoiceConverter()
     pipeline = make_pipeline(voice_converter=converter)
