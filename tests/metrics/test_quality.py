@@ -219,6 +219,11 @@ def test_relative_margin_rejects_empty_other_identity_set() -> None:
         relative_margin(target_identity=0.91, other_identities={})
 
 
+def test_cosine_similarity_happy_path() -> None:
+    assert cosine_similarity((1.0, 0.0), (1.0, 0.0)) == pytest.approx(1.0)
+    assert cosine_similarity((1.0, 0.0), (0.0, 1.0)) == pytest.approx(0.0)
+
+
 def test_cosine_similarity_rejects_length_mismatch() -> None:
     with pytest.raises(ValueError, match="embedding lengths must match"):
         cosine_similarity((1.0, 0.0), (1.0,))
