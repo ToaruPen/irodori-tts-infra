@@ -157,6 +157,31 @@ def test_quality_gate_warns_for_non_speech_relative_margin() -> None:
     assert result.issues[0].warning is True
 
 
+def test_quality_gate_fails_when_warning_and_hard_failure_are_mixed() -> None:
+    result = evaluate_quality_gate(
+        QualityGateInput(
+            scores=QualityScores(
+                primary_identity=0.63,
+                other_identities={"ミカ": 0.60},
+                utmos=3.4,
+            ),
+            thresholds=QualityThresholds(
+                primary_identity_min=0.60,
+                relative_margin_min=0.10,
+                utmos_min=3.5,
+            ),
+            non_speech=True,
+        ),
+    )
+
+    assert result.status is QualityGateStatus.FAIL
+    assert [issue.code for issue in result.issues] == [
+        "relative_margin_below_threshold",
+        "utmos_below_threshold",
+    ]
+    assert [issue.warning for issue in result.issues] == [True, False]
+
+
 def test_quality_gate_uses_mos_scale_for_quality_floor() -> None:
     result = evaluate_quality_gate(
         QualityGateInput(
@@ -191,6 +216,31 @@ def test_quality_gate_applies_f0_statistics_thresholds() -> None:
 
     assert result.status is QualityGateStatus.PASS
     assert result.issues == ()
+
+
+def test_quality_gate_applies_style_thresholds() -> None:
+    result = evaluate_quality_gate(
+        QualityGateInput(
+            scores=QualityScores(
+                speaking_rate=3.2,
+                pause_ratio=0.46,
+                rms_energy=0.04,
+            ),
+            thresholds=QualityThresholds(
+                speaking_rate_min=3.5,
+                speaking_rate_max=4.5,
+                pause_ratio_max=0.40,
+                rms_energy_min=0.05,
+            ),
+        ),
+    )
+
+    assert result.status is QualityGateStatus.FAIL
+    assert [issue.code for issue in result.issues] == [
+        "speaking_rate_below_threshold",
+        "pause_ratio_above_threshold",
+        "rms_energy_below_threshold",
+    ]
 
 
 def test_relative_margin_uses_nearest_other_character() -> None:
