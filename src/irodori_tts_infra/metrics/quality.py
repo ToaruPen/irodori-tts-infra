@@ -83,11 +83,19 @@ def _identity_issues(request: QualityGateInput) -> tuple[QualityGateIssue, ...]:
         threshold=request.thresholds.secondary_identity_min,
         warning=request.non_speech,
     )
-    if (
-        request.scores.primary_identity is not None
-        and request.thresholds.relative_margin_min is not None
-        and request.scores.other_identities
-    ):
+    if request.thresholds.relative_margin_min is not None:
+        if request.scores.primary_identity is None or not request.scores.other_identities:
+            issues.append(
+                QualityGateIssue(
+                    code="relative_margin_missing",
+                    metric="relative_margin",
+                    observed=None,
+                    threshold=request.thresholds.relative_margin_min,
+                    warning=request.non_speech,
+                ),
+            )
+            return tuple(issues)
+
         margin = relative_margin(
             target_identity=request.scores.primary_identity,
             other_identities=dict(request.scores.other_identities),

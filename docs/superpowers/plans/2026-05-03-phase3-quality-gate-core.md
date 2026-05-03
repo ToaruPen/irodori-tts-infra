@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Quality Gate Core Models and Verdicts
+## Task 1: Quality Gate Core Models and Verdicts
 
 **Files:**
 - Modify: `src/irodori_tts_infra/metrics/models.py`
@@ -50,7 +50,7 @@ uv run pytest
 
 Expected: all pass.
 
-### Explicit Follow-Up Scope
+## Explicit Follow-Up Scope
 
 - Real WavLM/ECAPA/SpeechMOS/parselmouth/librosa adapters.
 - Optional dependency grouping and `uv.lock` updates for heavy metric libraries.

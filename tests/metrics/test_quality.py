@@ -87,6 +87,36 @@ def test_quality_gate_fails_when_configured_score_is_missing() -> None:
     assert result.issues[0].threshold == pytest.approx(0.80)
 
 
+def test_quality_gate_fails_when_relative_margin_inputs_are_missing() -> None:
+    result = evaluate_quality_gate(
+        QualityGateInput(
+            scores=QualityScores(primary_identity=0.84),
+            thresholds=QualityThresholds(relative_margin_min=0.10),
+        ),
+    )
+
+    assert result.status is QualityGateStatus.FAIL
+    assert [issue.code for issue in result.issues] == ["relative_margin_missing"]
+    assert result.issues[0].observed is None
+    assert result.issues[0].threshold == pytest.approx(0.10)
+
+
+def test_quality_gate_warns_when_non_speech_relative_margin_inputs_are_missing() -> None:
+    result = evaluate_quality_gate(
+        QualityGateInput(
+            scores=QualityScores(other_identities={"ミカ": 0.60}),
+            thresholds=QualityThresholds(relative_margin_min=0.10),
+            non_speech=True,
+        ),
+    )
+
+    assert result.status is QualityGateStatus.WARN
+    assert [issue.code for issue in result.issues] == ["relative_margin_missing"]
+    assert result.issues[0].observed is None
+    assert result.issues[0].threshold == pytest.approx(0.10)
+    assert result.issues[0].warning is True
+
+
 def test_quality_gate_warns_instead_of_hard_failing_identity_for_non_speech() -> None:
     result = evaluate_quality_gate(
         QualityGateInput(
