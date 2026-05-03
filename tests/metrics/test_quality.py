@@ -243,6 +243,20 @@ def test_quality_gate_applies_style_thresholds() -> None:
     ]
 
 
+def test_quality_gate_fails_when_configured_max_score_is_missing() -> None:
+    result = evaluate_quality_gate(
+        QualityGateInput(
+            scores=QualityScores(),
+            thresholds=QualityThresholds(pause_ratio_max=0.40),
+        ),
+    )
+
+    assert result.status is QualityGateStatus.FAIL
+    assert [issue.code for issue in result.issues] == ["pause_ratio_missing"]
+    assert result.issues[0].observed is None
+    assert result.issues[0].threshold == pytest.approx(0.40)
+
+
 def test_relative_margin_uses_nearest_other_character() -> None:
     margin = relative_margin(
         target_identity=0.91,
