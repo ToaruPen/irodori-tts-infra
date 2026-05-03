@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from math import sqrt
-from operator import itemgetter
 
 from irodori_tts_infra.metrics.models import (
     QualityGateInput,
@@ -38,9 +37,9 @@ def relative_margin(
         msg = "other_identities must not be empty"
         raise ValueError(msg)
 
-    nearest_character, nearest_identity = max(
+    nearest_character, nearest_identity = min(
         other_identities.items(),
-        key=itemgetter(1),
+        key=lambda item: (-item[1], item[0]),
     )
     return RelativeMargin(
         value=target_identity - nearest_identity,

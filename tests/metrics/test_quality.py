@@ -204,11 +204,31 @@ def test_relative_margin_uses_nearest_other_character() -> None:
     assert margin.nearest_identity == pytest.approx(NEAREST_IDENTITY)
 
 
+def test_relative_margin_uses_character_name_as_tie_breaker() -> None:
+    margin = relative_margin(
+        target_identity=0.91,
+        other_identities={"ユイ": NEAREST_IDENTITY, "ミカ": NEAREST_IDENTITY},
+    )
+
+    assert margin.nearest_character == "ミカ"
+    assert margin.nearest_identity == pytest.approx(NEAREST_IDENTITY)
+
+
 def test_relative_margin_rejects_empty_other_identity_set() -> None:
     with pytest.raises(ValueError, match="other_identities must not be empty"):
         relative_margin(target_identity=0.91, other_identities={})
 
 
+def test_cosine_similarity_rejects_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="embedding lengths must match"):
+        cosine_similarity((1.0, 0.0), (1.0,))
+
+
 def test_cosine_similarity_rejects_empty_embedding() -> None:
     with pytest.raises(ValueError, match="embeddings must not be empty"):
         cosine_similarity((), ())
+
+
+def test_cosine_similarity_rejects_zero_vector() -> None:
+    with pytest.raises(ValueError, match="embeddings must not be zero vectors"):
+        cosine_similarity((0.0, 0.0), (1.0, 0.0))
