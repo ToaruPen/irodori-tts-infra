@@ -243,6 +243,27 @@ def test_quality_gate_applies_style_thresholds() -> None:
     ]
 
 
+def test_quality_gate_passes_when_style_scores_meet_thresholds() -> None:
+    result = evaluate_quality_gate(
+        QualityGateInput(
+            scores=QualityScores(
+                speaking_rate=3.8,
+                pause_ratio=0.30,
+                rms_energy=0.06,
+            ),
+            thresholds=QualityThresholds(
+                speaking_rate_min=3.5,
+                speaking_rate_max=4.5,
+                pause_ratio_max=0.40,
+                rms_energy_min=0.05,
+            ),
+        ),
+    )
+
+    assert result.status is QualityGateStatus.PASS
+    assert result.issues == ()
+
+
 def test_quality_gate_fails_when_configured_max_score_is_missing() -> None:
     result = evaluate_quality_gate(
         QualityGateInput(
