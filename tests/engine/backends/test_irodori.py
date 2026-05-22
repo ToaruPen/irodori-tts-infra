@@ -283,6 +283,15 @@ def test_synthesize_forwards_sampling_request_fields() -> None:
     assert call.context_kv_cache is False
 
 
+def test_synthesize_normalizes_ref_embed_before_sampling_request() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.synthesize(synthesis_request(ref_embed=f"  {DEFAULT_REF_EMBED}  "))
+
+    assert runtime.calls[0].ref_embed == DEFAULT_REF_EMBED
+
+
 def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:
     backend = make_backend(FakeRuntime(FakeRuntimeResult(sample_rate=48_000)))
 
@@ -348,6 +357,15 @@ def test_warm_up_uses_warmup_settings_and_ref_embed() -> None:
     assert call.ref_embed == NARRATOR_REF_EMBED
     assert call.num_steps == WARMUP_STEPS
     assert call.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+
+
+def test_warm_up_normalizes_ref_embed_before_sampling_request() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.warm_up(ref_embed=f"  {NARRATOR_REF_EMBED}  ")
+
+    assert runtime.calls[0].ref_embed == NARRATOR_REF_EMBED
 
 
 def test_close_marks_backend_unavailable() -> None:

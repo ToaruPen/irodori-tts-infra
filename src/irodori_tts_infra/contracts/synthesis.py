@@ -23,6 +23,9 @@ class _ContractModel(BaseModel):
     )
 
 
+MAX_NUM_CANDIDATES = 4
+
+
 class SynthesisRequest(_ContractModel):
     text: str = Field(min_length=1)
     speaker: str | None = Field(default=None, min_length=1)
@@ -32,7 +35,7 @@ class SynthesisRequest(_ContractModel):
     cfg_scale_speaker: float = Field(default=5.0, gt=0.0)
     seed: int | None = None
     duration_scale: float = Field(default=1.0, gt=0.0)
-    num_candidates: int = Field(default=1, gt=0)
+    num_candidates: int = Field(default=1, gt=0, le=MAX_NUM_CANDIDATES)
     t_schedule_mode: Literal["linear", "sway"] = "linear"
     sway_coeff: float = -1.0
 
@@ -47,10 +50,13 @@ class SynthesisRequest(_ContractModel):
     @field_validator("speaker", "ref_embed")
     @classmethod
     def _reject_blank_optional_text(cls, value: str | None) -> str | None:
-        if value is not None and not value.strip():
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
             msg = "text fields must not be blank"
             raise ValueError(msg)
-        return value
+        return stripped
 
 
 class SynthesisSegment(SynthesisRequest):

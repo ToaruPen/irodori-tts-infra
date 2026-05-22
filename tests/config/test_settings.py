@@ -62,6 +62,15 @@ def test_settings_defaults_match_phase1_runtime_plan() -> None:
     assert paths.temp_wav_dir.name == "irodori-tts-wav"
 
 
+def test_runtime_settings_rejects_blank_checkpoint_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IRODORI_TTS_RUNTIME_CHECKPOINT", "   ")
+
+    with pytest.raises(ValidationError, match="checkpoint"):
+        IrodoriRuntimeSettings()
+
+
 def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     temp_wav_dir = tmp_path / "wav"
     monkeypatch.setenv("IRODORI_TTS_CLIENT_HOST", "100.112.161.83")

@@ -257,6 +257,7 @@ ignore_names = [
   "traceback",
   "warm_up",
   "_normalize_aliases",
+  "_normalize_*",
   "_reject_*",
   "_serialize_*",
   "_validate_*",

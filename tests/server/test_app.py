@@ -12,7 +12,7 @@ from starlette import status
 from irodori_tts_infra.contracts import MAX_CHUNK_SIZE_BYTES
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.errors import BackendUnavailableError
-from irodori_tts_infra.server.app import create_app
+from irodori_tts_infra.server.app import create_app, create_app_from_factory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 
 pytestmark = pytest.mark.unit
+EXPECTED_LIFESPAN_COUNT = 2
 
 
 class _WarmableSynthesizer(Protocol):
@@ -33,6 +34,21 @@ class WarmupUnavailableSynthesizer(FakeSynthesizer):
     def warm_up(**_kwargs: object) -> None:
         msg = "warmup backend unavailable"
         raise BackendUnavailableError(msg)
+
+
+class TrackingWarmableSynthesizer(FakeSynthesizer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.warm_up_calls = 0
+        self.warm_up_ref_embeds: list[str] = []
+        self.close_calls = 0
+
+    def warm_up(self, *, ref_embed: str) -> None:
+        self.warm_up_calls += 1
+        self.warm_up_ref_embeds.append(ref_embed)
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 def test_create_app_warms_up_and_closes_backend(
@@ -54,6 +70,28 @@ def test_create_app_warms_up_and_closes_backend(
         assert response.json()["max_chunk_size"] == MAX_CHUNK_SIZE_BYTES
 
     assert warmable_synthesizer.close_calls == 1
+
+
+def test_factory_app_recreates_pipeline_after_lifespan_shutdown(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    synthesizers: list[_WarmableSynthesizer] = []
+
+    def build_pipeline() -> SynthesisPipeline:
+        synthesizer = TrackingWarmableSynthesizer()
+        synthesizers.append(synthesizer)
+        return pipeline_factory(synthesizer)
+
+    app = create_app_from_factory(build_pipeline)
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == status.HTTP_200_OK
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == status.HTTP_200_OK
+
+    assert len(synthesizers) == EXPECTED_LIFESPAN_COUNT
+    assert [synthesizer.warm_up_calls for synthesizer in synthesizers] == [1, 1]
+    assert [synthesizer.close_calls for synthesizer in synthesizers] == [1, 1]
 
 
 def test_create_app_handles_backend_unavailable_on_warmup(

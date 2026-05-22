@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import quote
 
 from irodori_tts_infra.deploy.remote._common import _run
 from irodori_tts_infra.deploy.remote.sync import (
@@ -75,9 +76,12 @@ def _bootstrap_script(
     )
     return (
         f"Set-Location -LiteralPath {_ps_quote(remote_dir)}; "
+        "$lockFile = Join-Path (Get-Location) 'uv.lock'; "
+        "if (!(Test-Path -LiteralPath $lockFile)) { "
+        "throw 'uv.lock is required; run deploy-sync first' }; "
         f"uv venv '.runtime-venv' --python {_ps_quote(python_version)} --clear; "
+        f"uv sync --all-extras --locked --python {runtime_python}; "
         f"uv pip install --python {runtime_python} {_ps_quote(irodori_requirement)}; "
-        f"uv pip install --python {runtime_python} {_ps_quote('.[server,irodori]')}; "
         f"uv pip check --python {runtime_python}"
     )
 
@@ -96,9 +100,10 @@ def _ps_quote(value: str) -> str:
 
 def _path_to_file_url(path: str) -> str:
     normalized = path.replace("\\", "/")
+    quoted = quote(normalized, safe="/:")
     if normalized.startswith("/"):
-        return f"file://{normalized}"
-    return f"file:///{normalized}"
+        return f"file://{quoted}"
+    return f"file:///{quoted}"
 
 
 def _reject_blank(name: str, value: str) -> None:

@@ -202,7 +202,7 @@ Add `SPEAKER_MANIFEST_FILENAME = "voice_bank_speakers.toml"` and replace RVC par
 Remove VoiceDesign caption generation from the standard public surface. Keep only character-name parsing if useful:
 
 ```python
-def load_characters_markdown(content: str) -> dict[str, str]:
+def load_characters_markdown(content: str) -> set[str]:
     ...
 ```
 
@@ -356,11 +356,16 @@ Expected: pass.
 
 - [ ] **Step 1: Update server request tests**
 
-Update synthesis route tests so payloads use `ref_embed` instead of `caption`.
+Update synthesis route tests so public payloads use `speaker` instead of
+`caption` or `ref_embed`. Public HTTP clients must not send local server file
+paths.
 
 - [ ] **Step 2: Update route implementation**
 
-Forward `ref_embed` and v3 request fields into `SynthesisJob` / `SynthesisRequest`; remove `cfg_scale_caption`.
+Forward `speaker` and v3 request fields into `SynthesisJob`; remove
+`cfg_scale_caption`. The server-side pipeline resolves `speaker` against
+`voice_bank_speakers.toml` and only then populates the backend `SynthesisRequest`
+with `ref_embed`.
 
 - [ ] **Step 3: Add deploy bootstrap tests**
 

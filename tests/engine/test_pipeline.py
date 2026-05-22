@@ -523,6 +523,26 @@ def test_synthesize_job_maps_backend_audio_to_contract_result() -> None:
     assert not hasattr(SynthesizedAudio(wav_bytes=b"x", sample_rate=1), "elapsed_seconds")
 
 
+@pytest.mark.parametrize("speaker", [None, "unknown"])
+def test_synthesize_job_explicit_ref_embed_bypasses_speaker_resolution(
+    speaker: str | None,
+) -> None:
+    fake = FakeSynthesizer()
+    pipeline = make_pipeline(fake)
+    job = SynthesisJob(
+        segment_index=0,
+        text="本文",
+        speaker=speaker,
+        ref_embed="speakers/explicit.speaker.safetensors",
+        require_speaker=True,
+    )
+
+    pipeline.synthesize_job(job)
+
+    assert len(fake.calls) == 1
+    assert fake.calls[0].ref_embed == "speakers/explicit.speaker.safetensors"
+
+
 def test_pipeline_config_validates_capacity_and_timeout() -> None:
     with pytest.raises(TypeError, match="capacity must be an int >= 1"):
         PipelineConfig(capacity=1.5)  # type: ignore[arg-type]

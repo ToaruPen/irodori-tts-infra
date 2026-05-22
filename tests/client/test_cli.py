@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Self
 
 import pytest
+import typer
 from typer.testing import CliRunner
 from typing_extensions import override
 
@@ -177,6 +178,35 @@ def test_read_aloud_missing_turn_file_exits_with_error(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "does not exist" in result.output
+
+
+def test_validate_optional_local_profile_reports_invalid_speaker_profile(
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("本文です。", encoding="utf-8")
+    characters = tmp_path / "characters.md"
+    characters.write_text("## ミカ\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."いない"]
+ref_embed = "speakers/missing.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(typer.BadParameter) as exc_info:
+        cli._validate_optional_local_profile(  # noqa: SLF001
+            turn_file=turn_file,
+            characters=characters,
+            speaker_manifest=manifest,
+        )
+
+    assert "invalid --speaker-manifest/--characters" in str(exc_info.value)
 
 
 def test_read_aloud_synthesis_failure_exits_with_error(

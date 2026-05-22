@@ -47,9 +47,15 @@ def load_voice_profile(
         raise ValueError(msg)
 
     known_names: set[str] = set()
-    resolved_characters_md = (
-        characters_md if characters_md is not None and characters_md.is_file() else None
-    )
+    resolved_characters_md = None
+    if characters_md is not None:
+        if not characters_md.exists():
+            msg = f"characters_md path does not exist: {characters_md}"
+            raise ValueError(msg)
+        if not characters_md.is_file():
+            msg = f"characters_md path is not a file: {characters_md}"
+            raise ValueError(msg)
+        resolved_characters_md = characters_md
     if resolved_characters_md is not None:
         known_names = load_characters_markdown(
             resolved_characters_md.read_text(encoding="utf-8"),
@@ -89,7 +95,8 @@ def _load_speaker_manifest(
 
     narrator_table = _as_table(data["narrator"], "narrator")
     if "characters" in narrator_table:
-        _as_table(narrator_table["characters"], "characters")
+        msg = "narrator.characters is invalid; define characters at top level"
+        raise ValueError(msg)
     narrator = _parse_speaker_profile(
         narrator_table,
         context="narrator",

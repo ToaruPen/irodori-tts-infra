@@ -24,7 +24,7 @@ def test_load_characters_markdown_parses_supported_heading_levels(
     assert load_characters_markdown(content) == expected_names
 
 
-def test_load_characters_markdown_skips_heading_with_zero_attrs() -> None:
+def test_load_characters_markdown_keeps_heading_with_zero_attrs() -> None:
     content = """
 ## 空の見出し
 
@@ -32,7 +32,7 @@ def test_load_characters_markdown_skips_heading_with_zero_attrs() -> None:
 - **性格**: 未設定
 """
 
-    assert load_characters_markdown(content) == {"ミカ"}
+    assert load_characters_markdown(content) == {"空の見出し", "ミカ"}
 
 
 def test_load_characters_markdown_emits_multiple_blocks() -> None:

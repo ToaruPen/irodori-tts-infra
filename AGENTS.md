@@ -9,7 +9,7 @@ Generated audio, model weights, datasets, checkpoints, and local secrets are not
 
 ## Architecture
 
-```
+```text
 Text → Irodori-TTS v3 base
      → per-character Speaker Inversion embedding (.speaker.safetensors)
      → Multi-metric quality gate (automated pass/fail)

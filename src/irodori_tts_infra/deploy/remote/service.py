@@ -94,9 +94,8 @@ def _load_env_script() -> str:
 
 
 def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
-    settings = ServerSettings()
-    default_host = _ps_quote(settings.host)
-    default_port = _ps_quote(str(settings.port))
+    default_host = _ps_quote(str(ServerSettings.model_fields["host"].default))
+    default_port = _ps_quote(str(ServerSettings.model_fields["port"].default))
     host_expr = (
         _ps_quote(server_host)
         if server_host is not None

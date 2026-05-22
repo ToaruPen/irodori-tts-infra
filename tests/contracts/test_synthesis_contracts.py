@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from irodori_tts_infra.contracts import (
     MAX_CHUNK_SIZE_BYTES,
+    MAX_NUM_CANDIDATES,
     MAX_SEGMENT_INDEX,
     STREAM_HEADER_VERSION,
     BatchSynthesisRequest,
@@ -56,6 +57,23 @@ def test_synthesis_request_defaults_and_validation() -> None:
             ref_embed="speakers/narrator.speaker.safetensors",
             num_candidates=0,
         )
+    with pytest.raises(ValidationError, match="num_candidates"):
+        SynthesisRequest(
+            text="こんにちは",
+            ref_embed="speakers/narrator.speaker.safetensors",
+            num_candidates=MAX_NUM_CANDIDATES + 1,
+        )
+
+
+def test_synthesis_request_normalizes_optional_identifiers() -> None:
+    request = SynthesisRequest(
+        text="こんにちは",
+        speaker="  ミカ  ",
+        ref_embed="  speakers/mika.speaker.safetensors  ",
+    )
+
+    assert request.speaker == "ミカ"
+    assert request.ref_embed == "speakers/mika.speaker.safetensors"
 
 
 def test_contracts_round_trip_through_json() -> None:
@@ -80,7 +98,6 @@ def test_contracts_round_trip_through_json() -> None:
     health = HealthResponse(status="ok", model_loaded=True)
     voice = VoiceProfileResponse(
         name="Narrator",
-        ref_embed="speakers/narrator.speaker.safetensors",
     )
     error = ErrorPayload(code="validation_error", message="invalid request")
     synthesis_result = SynthesisResult(
@@ -313,7 +330,6 @@ def test_stream_handshake_header_rejects_out_of_range_max_chunk_size() -> None:
 def test_voice_profile_aliases_validation() -> None:
     profile = VoiceProfileResponse(
         name="Narrator",
-        ref_embed="speakers/narrator.speaker.safetensors",
         aliases=("Narrator-JP", "  Narrator-JP  ", "語り手"),
     )
     assert profile.aliases == ("Narrator-JP", "語り手")
@@ -321,6 +337,5 @@ def test_voice_profile_aliases_validation() -> None:
     with pytest.raises(ValidationError, match="aliases"):
         VoiceProfileResponse(
             name="X",
-            ref_embed="speakers/x.speaker.safetensors",
             aliases=("   ",),
         )

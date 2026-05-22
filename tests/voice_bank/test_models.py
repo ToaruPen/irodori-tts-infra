@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -43,3 +44,20 @@ def test_voice_profile_requires_narrator_and_character_speakers() -> None:
 
     assert profile.narrator is narrator
     assert profile.characters["ミカ"] is mika
+
+
+def test_voice_profile_copies_characters_into_read_only_mapping() -> None:
+    narrator = SpeakerEmbeddingProfile(Path("speakers/narrator.speaker.safetensors"))
+    mika = CharacterVoice(
+        name="ミカ",
+        speaker=SpeakerEmbeddingProfile(Path("speakers/mika.speaker.safetensors")),
+    )
+    characters = {"ミカ": mika}
+
+    profile = VoiceProfile(characters=characters, narrator=narrator)
+    characters.clear()
+
+    assert isinstance(profile.characters, MappingProxyType)
+    assert profile.characters["ミカ"] is mika
+    with pytest.raises(TypeError):
+        profile.characters["別名"] = mika  # type: ignore[index]

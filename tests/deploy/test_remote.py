@@ -25,6 +25,7 @@ def make_project(root: Path) -> None:
     (root / "src" / "package.py").write_text("", encoding="utf-8")
     (root / "README.md").write_text("# test\n", encoding="utf-8")
     (root / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
+    (root / "uv.lock").write_text("# lock\n", encoding="utf-8")
     (root / ".env.example").write_text("IRODORI_REMOTE_HOST=user@host\n", encoding="utf-8")
 
 
@@ -101,6 +102,7 @@ def test_sync_uses_rsync_with_expected_sources_and_excludes(
                 str(tmp_path / "src"),
                 str(tmp_path / "README.md"),
                 str(tmp_path / "pyproject.toml"),
+                str(tmp_path / "uv.lock"),
                 str(tmp_path / ".env.example"),
                 "gpu:C:/irodori/",
             ],
@@ -129,6 +131,7 @@ def test_sync_falls_back_to_ssh_mkdir_and_scp_when_rsync_is_unavailable(
             f"{tmp_path / 'src'}",
             str(tmp_path / "README.md"),
             str(tmp_path / "pyproject.toml"),
+            str(tmp_path / "uv.lock"),
             str(tmp_path / ".env.example"),
             "gpu:C:/irodori/",
         ],
@@ -216,13 +219,22 @@ def test_bootstrap_creates_remote_dir_then_runtime_venv(
     assert "C:/irodori" in remote_command(commands[0][0])
     bootstrap_script = remote_command(commands[1][0])
     assert "Set-Location -LiteralPath 'C:/irodori'" in bootstrap_script
+    assert "uv.lock is required; run deploy-sync first" in bootstrap_script
     assert "uv venv '.runtime-venv' --python '3.11' --clear" in bootstrap_script
+    assert "uv sync --all-extras --locked --python" in bootstrap_script
     assert "Irodori-TTS[cu128] @ file:///C:/Irodori-TTS" in bootstrap_script
-    assert "'.[server,irodori]'" in bootstrap_script
+    assert "'.[server,irodori]'" not in bootstrap_script
     pip_check = (
         "uv pip check --python $(Join-Path (Get-Location) '.runtime-venv/Scripts/python.exe')"
     )
     assert pip_check in bootstrap_script
+
+
+def test_bootstrap_file_url_percent_encodes_path_component() -> None:
+    assert (
+        bootstrap._path_to_file_url("C:/Irodori TTS/repo#1")  # noqa: SLF001
+        == "file:///C:/Irodori%20TTS/repo%231"
+    )
 
 
 def test_bootstrap_resolves_runtime_options_from_environment(
@@ -259,6 +271,8 @@ def test_start_service_uses_uvicorn_and_pid_file(
 def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("IRODORI_TTS_SERVER_HOST", "127.0.0.9")
+    monkeypatch.setenv("IRODORI_TTS_SERVER_PORT", "9999")
     commands = record_commands(monkeypatch, service)
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori")
@@ -266,8 +280,10 @@ def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
     script = remote_command(commands[0][0])
     assert "$serverHost = if ($env:IRODORI_TTS_SERVER_HOST)" in script
     assert "$port = if ($env:IRODORI_TTS_SERVER_PORT)" in script
-    assert f"{{ {ps_string(ServerSettings().host)} }}" in script
-    assert f"{{ '{ServerSettings().port}' }}" in script
+    assert f"{{ {ps_string(ServerSettings.model_fields['host'].default)} }}" in script
+    assert f"{{ '{ServerSettings.model_fields['port'].default}' }}" in script
+    assert "127.0.0.9" not in script
+    assert "9999" not in script
     assert "'--host', $serverHost, '--port', $port" in script
 
 

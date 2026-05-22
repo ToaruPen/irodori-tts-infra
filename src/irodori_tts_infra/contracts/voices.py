@@ -5,10 +5,9 @@ from pydantic import BaseModel, Field, field_validator
 
 class VoiceProfileResponse(BaseModel):
     name: str = Field(min_length=1)
-    ref_embed: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
 
-    @field_validator("name", "ref_embed")
+    @field_validator("name")
     @classmethod
     def _reject_blank_text(cls, value: str) -> str:
         if not value.strip():

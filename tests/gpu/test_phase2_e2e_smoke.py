@@ -115,13 +115,14 @@ def test_phase2_chain_uses_speaker_embeddings_for_dialogue_and_narration(
     assert narration_result.segment_index == 1
 
     dialogue_nframes, dialogue_sample_rate = _decode_wav(dialogue_result)
-    narration_nframes, _ = _decode_wav(narration_result)
+    narration_nframes, narration_sample_rate = _decode_wav(narration_result)
     assert dialogue_nframes > 0
     assert narration_nframes > 0
     assert dialogue_result.elapsed_seconds > 0
     assert narration_result.elapsed_seconds > 0
 
     assert dialogue_sample_rate > 0
+    assert narration_sample_rate > 0
 
     assert result.total_elapsed_seconds > 0
     assert result.total_elapsed_seconds < MAX_SMOKE_SECONDS

@@ -70,6 +70,10 @@ def create_app_from_factory(
                         "pipeline component close failed",
                         component=type(backend).__name__,
                     )
+            if initial_pipeline is None:
+                app.state.pipeline = None
+                app.state.model_loaded = False
+                app.state.health_detail = None
 
     app = FastAPI(lifespan=lifespan)
     app.state.pipeline = initial_pipeline

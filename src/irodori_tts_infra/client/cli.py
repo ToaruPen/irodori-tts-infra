@@ -153,7 +153,11 @@ def _validate_optional_local_profile(
     )
     if manifest_path is None:
         return
-    load_voice_profile(characters_path, speaker_manifest=manifest_path)
+    try:
+        load_voice_profile(characters_path, speaker_manifest=manifest_path)
+    except (OSError, TypeError, ValueError) as exc:
+        msg = f"invalid --speaker-manifest/--characters input: {exc}"
+        raise typer.BadParameter(msg) from exc
 
 
 def _base_url_from_remote_host(remote_host: str | None) -> str | None:

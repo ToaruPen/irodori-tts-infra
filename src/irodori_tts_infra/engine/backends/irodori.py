@@ -84,10 +84,11 @@ class IrodoriBaseBackend:
         if request.ref_embed is None or not request.ref_embed.strip():
             msg = "synthesis ref_embed is required"
             raise BackendUnavailableError(msg)
+        ref_embed = request.ref_embed.strip()
 
         sampling_request = self._sampling_request_cls(
             text=request.text,
-            ref_embed=request.ref_embed,
+            ref_embed=ref_embed,
             num_steps=request.num_steps,
             cfg_scale_text=request.cfg_scale_text,
             cfg_scale_speaker=request.cfg_scale_speaker,
@@ -109,9 +110,10 @@ class IrodoriBaseBackend:
         if ref_embed is None or not ref_embed.strip():
             msg = "warmup ref_embed is required"
             raise BackendUnavailableError(msg)
+        normalized_ref_embed = ref_embed.strip()
         request = self._sampling_request_cls(
             text=self._settings.warmup_text,
-            ref_embed=ref_embed,
+            ref_embed=normalized_ref_embed,
             num_steps=self._settings.warmup_num_steps,
             cfg_scale_text=self._settings.cfg_scale_text,
             cfg_scale_speaker=self._settings.cfg_scale_speaker,

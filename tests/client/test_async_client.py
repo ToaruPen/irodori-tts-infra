@@ -231,6 +231,7 @@ async def test_synthesize_stream_posts_single_request_to_asgi_server() -> None:
         )
 
     assert b"".join(chunks) == b"RIFFstream"
+    assert len(synthesizer.calls) == 1
     assert synthesizer.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
 
 

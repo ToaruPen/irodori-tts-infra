@@ -55,6 +55,15 @@ class IrodoriRuntimeSettings(BaseSettings):
     context_kv_cache: bool = True
     compile_model: bool = False
 
+    @field_validator("checkpoint")
+    @classmethod
+    def _normalize_checkpoint(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            msg = "checkpoint must not be blank"
+            raise ValueError(msg)
+        return stripped
+
 
 class PathSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="IRODORI_TTS_PATH_", extra="forbid")

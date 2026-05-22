@@ -162,6 +162,35 @@ ref_embed = "speakers/chizuru.speaker.safetensors"
     assert set(profile.characters) == {"チヅル"}
 
 
+def test_load_voice_profile_rejects_missing_characters_markdown_path(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        "[narrator]\nref_embed = 'speakers/narrator.speaker.safetensors'\n",
+        encoding="utf-8",
+    )
+    missing = tmp_path / "missing.md"
+
+    with pytest.raises(ValueError, match=r"characters_md path does not exist: .*missing\.md"):
+        load_voice_profile(missing, speaker_manifest=manifest)
+
+
+def test_load_voice_profile_rejects_characters_markdown_directory(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        "[narrator]\nref_embed = 'speakers/narrator.speaker.safetensors'\n",
+        encoding="utf-8",
+    )
+    directory = tmp_path / "characters.md"
+    directory.mkdir()
+
+    with pytest.raises(ValueError, match=r"characters_md path is not a file: .*characters\.md"):
+        load_voice_profile(directory, speaker_manifest=manifest)
+
+
 def test_load_voice_profile_rejects_manifest_character_missing_from_markdown(
     tmp_path: Path,
 ) -> None:
@@ -250,7 +279,17 @@ ref_embed = '{ref_embed}'
 ref_embed = "speakers/narrator.speaker.safetensors"
 characters = "bad"
 """,
-            r"characters must be a TOML table",
+            r"narrator\.characters is invalid; define characters at top level",
+        ),
+        (
+            """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[narrator.characters."ミカ"]
+ref_embed = "speakers/mika.speaker.safetensors"
+""",
+            r"narrator\.characters is invalid; define characters at top level",
         ),
         (
             """
