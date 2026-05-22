@@ -2,7 +2,7 @@
 
 ## Project
 
-`irodori-tts-infra` is a Python 3.11+ infrastructure project for Irodori-TTS + RVC voice conversion pipelines.
+`irodori-tts-infra` is a Python 3.11+ infrastructure project for Irodori-TTS v3 base synthesis with Speaker Inversion voice identity.
 
 The import package lives under `src/irodori_tts_infra/`. Tests live under `tests/`.
 Generated audio, model weights, datasets, checkpoints, and local secrets are not source files.
@@ -10,13 +10,13 @@ Generated audio, model weights, datasets, checkpoints, and local secrets are not
 ## Architecture
 
 ```
-Text → Irodori-TTS VoiceDesign (expressive audio generation)
-     → RVC per-character model (voice identity conversion)
+Text → Irodori-TTS v3 base
+     → per-character Speaker Inversion embedding (.speaker.safetensors)
      → Multi-metric quality gate (automated pass/fail)
      → Playback / cache
 ```
 
-Irodori-TTS VoiceDesign entangles voice identity with text content. RVC decouples expressiveness from identity by converting the output voice after generation.
+Voice identity is supplied by the narrator or character `ref_embed` from `voice_bank_speakers.toml`. RVC and VoiceDesign captions are not part of the standard path.
 
 ## Commands
 

@@ -18,7 +18,7 @@ THREAD_COUNT = 10
 
 
 def make_request(text: str = "こんにちは") -> SynthesisRequest:
-    return SynthesisRequest(text=text, caption="女性が自然な口調で話している。")
+    return SynthesisRequest(text=text, ref_embed="speakers/narrator.speaker.safetensors")
 
 
 def test_default_response_returns_default_audio() -> None:

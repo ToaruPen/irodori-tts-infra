@@ -58,9 +58,42 @@ def deploy_bootstrap(
     *,
     remote_host: RemoteHostOption = None,
     remote_dir: RemoteDirOption = None,
+    irodori_tts_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--irodori-tts-dir",
+            help="Windows Irodori-TTS checkout directory. Defaults to IRODORI_TTS_DIR.",
+        ),
+    ] = None,
+    python_version: Annotated[
+        str | None,
+        typer.Option(
+            "--python-version",
+            help=(
+                "Python version for the runtime venv. "
+                "Defaults to IRODORI_TTS_RUNTIME_PYTHON or 3.11."
+            ),
+        ),
+    ] = None,
+    torch_backend_extra: Annotated[
+        str | None,
+        typer.Option(
+            "--torch-backend-extra",
+            help=(
+                "Irodori-TTS optional extra for the torch backend. "
+                "Defaults to IRODORI_TTS_TORCH_BACKEND_EXTRA or cu128."
+            ),
+        ),
+    ] = None,
 ) -> None:
     try:
-        bootstrap_remote(remote_host=remote_host, remote_dir=remote_dir)
+        bootstrap_remote(
+            remote_host=remote_host,
+            remote_dir=remote_dir,
+            irodori_tts_dir=irodori_tts_dir,
+            python_version=python_version,
+            torch_backend_extra=torch_backend_extra,
+        )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("deploy bootstrap complete")

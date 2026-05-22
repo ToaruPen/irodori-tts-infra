@@ -22,7 +22,7 @@ RSYNC_EXCLUDES = (
     "outputs/",
     "runs/",
 )
-_SYNC_ITEMS = ("src", "pyproject.toml", ".env.example")
+_SYNC_ITEMS = ("src", "README.md", "pyproject.toml", ".env.example")
 
 
 def sync_project(
@@ -70,6 +70,7 @@ def _rsync_command(remote_host: str, remote_dir: str, repo_root: Path) -> list[s
     command.extend(
         [
             str(repo_root / "src"),
+            str(repo_root / "README.md"),
             str(repo_root / "pyproject.toml"),
             str(repo_root / ".env.example"),
             remote_target,
@@ -84,6 +85,7 @@ def _scp_command(remote_host: str, remote_dir: str, repo_root: Path) -> list[str
         "scp",
         "-r",
         str(repo_root / "src"),
+        str(repo_root / "README.md"),
         str(repo_root / "pyproject.toml"),
         str(repo_root / ".env.example"),
         remote_target,

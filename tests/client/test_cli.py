@@ -10,10 +10,6 @@ from typing_extensions import override
 
 from irodori_tts_infra.client import cli
 from irodori_tts_infra.client.errors import ClientUnavailableError
-from irodori_tts_infra.voice_bank import (
-    DEFAULT_GENERIC_DIALOGUE_CAPTION,
-    DEFAULT_NARRATOR_CAPTION,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -59,25 +55,62 @@ class FailingSyncIrodoriClient(FakeSyncIrodoriClient):
         raise ClientUnavailableError(message, endpoint="/synthesize_stream")
 
 
-def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
+def write_speaker_manifest(root: Path) -> Path:
+    manifest = root / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."チヅル"]
+ref_embed = "speakers/chizuru.speaker.safetensors"
+
+[characters."ミカ"]
+ref_embed = "speakers/mika.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def write_narrator_only_speaker_manifest(root: Path) -> Path:
+    manifest = root / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_read_aloud_synthesizes_and_plays_segments_in_speaker_order(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text(
-        "# Turn\n地の文です。\n【チヅル:小声で】「こんにちは」\n【不明】「だれ?」\n",
+        "# Turn\n地の文です。\n【チヅル:小声で】「こんにちは」\n",
         encoding="utf-8",
     )
     (tmp_path / "characters.md").write_text(
-        "## チヅル\n- **性格**: クール\n- **年齢/外見**: 高校生の女子\n",
+        """
+## チヅル
+- **性格**: クール
+- **年齢/外見**: 高校生の女子
+
+## ミカ
+- **性格**: 明るい
+""",
         encoding="utf-8",
     )
+    write_speaker_manifest(tmp_path)
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_chunks_by_text = {
         "地の文です。": [b"narration-", b"wav"],
         "こんにちは": [b"known-wav"],
-        "だれ?": [b"unknown-wav"],
     }
     played_audio: list[bytes] = []
 
@@ -94,23 +127,20 @@ def test_read_aloud_synthesizes_and_plays_segments_in_resolved_caption_order(
     result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
 
     assert result.exit_code == 0, result.output
-    assert played_audio == [b"narration-wav", b"known-wav", b"unknown-wav"]
+    assert played_audio == [b"narration-wav", b"known-wav"]
     assert FakeSyncIrodoriClient.events == [
         ("synthesize", "地の文です。"),
         ("play", b"narration-wav"),
         ("synthesize", "こんにちは"),
         ("play", b"known-wav"),
-        ("synthesize", "だれ?"),
-        ("play", b"unknown-wav"),
     ]
     client = FakeSyncIrodoriClient.instances[0]
     assert client.closed is True
-    assert [request.text for request in client.requests] == ["地の文です。", "こんにちは", "だれ?"]
-    assert client.requests[0].caption == DEFAULT_NARRATOR_CAPTION
-    assert client.requests[1].caption == (
-        "若い女性が、落ち着いたクールな調子で小声で話している。クリアな音質。若々しい声。"
-    )
-    assert client.requests[2].caption == DEFAULT_GENERIC_DIALOGUE_CAPTION
+    assert [request.text for request in client.requests] == ["地の文です。", "こんにちは"]
+    assert client.requests[0].speaker is None
+    assert client.requests[0].ref_embed is None
+    assert client.requests[1].speaker == "チヅル"
+    assert client.requests[1].ref_embed is None
 
 
 def test_read_aloud_removes_temp_wav_after_playback_failure(
@@ -119,6 +149,7 @@ def test_read_aloud_removes_temp_wav_after_playback_failure(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
@@ -154,6 +185,7 @@ def test_read_aloud_synthesis_failure_exits_with_error(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     FailingSyncIrodoriClient.instances = []
     monkeypatch.setattr(cli, "SyncIrodoriClient", FailingSyncIrodoriClient)
 
@@ -163,12 +195,13 @@ def test_read_aloud_synthesis_failure_exits_with_error(
     assert "connection failed" in result.output
 
 
-def test_read_aloud_uses_default_profile_without_characters_markdown(
+def test_read_aloud_uses_speaker_manifest_without_characters_markdown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     turn_file = tmp_path / "turn.md"
-    turn_file.write_text("地の文です。\n「こんにちは」\n", encoding="utf-8")
+    turn_file.write_text("地の文です。\n【ミカ】「こんにちは」\n", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     save_dir = tmp_path / "audio"
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
@@ -185,12 +218,71 @@ def test_read_aloud_uses_default_profile_without_characters_markdown(
 
     assert result.exit_code == 0, result.output
     requests = FakeSyncIrodoriClient.instances[0].requests
-    assert [request.caption for request in requests] == [
-        DEFAULT_NARRATOR_CAPTION,
-        DEFAULT_GENERIC_DIALOGUE_CAPTION,
+    assert [(request.speaker, request.ref_embed) for request in requests] == [
+        (None, None),
+        ("ミカ", None),
     ]
     assert (save_dir / "segment-0000.wav").read_bytes() == b"narration-wav"
     assert (save_dir / "segment-0001.wav").read_bytes() == b"dialogue-wav"
+
+
+def test_read_aloud_sends_speaker_without_local_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("地の文です。\n【ミカ】「こんにちは」\n", encoding="utf-8")
+    save_dir = tmp_path / "audio"
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {
+        "地の文です。": [b"narration-wav"],
+        "こんにちは": [b"dialogue-wav"],
+    }
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "read-aloud",
+            str(turn_file),
+            "--remote-host",
+            "gpu.example.test",
+            "--save-dir",
+            str(save_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    requests = FakeSyncIrodoriClient.instances[0].requests
+    assert [(request.speaker, request.ref_embed) for request in requests] == [
+        (None, None),
+        ("ミカ", None),
+    ]
+
+
+def test_read_aloud_does_not_reject_speaker_missing_from_local_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("【リナ】「こんにちは」\n", encoding="utf-8")
+    write_narrator_only_speaker_manifest(tmp_path)
+    save_dir = tmp_path / "audio"
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {"こんにちは": [b"dialogue-wav"]}
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["read-aloud", str(turn_file), "--save-dir", str(save_dir)],
+    )
+
+    assert result.exit_code == 0, result.output
+    request = FakeSyncIrodoriClient.instances[0].requests[0]
+    assert request.speaker == "リナ"
+    assert request.ref_embed is None
 
 
 def test_read_aloud_remote_host_override_builds_client_base_url(
@@ -199,6 +291,7 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
@@ -216,6 +309,7 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
 
     assert result.exit_code == 0, result.output
     assert FakeSyncIrodoriClient.instances[0].base_url == "http://100.112.161.83:8923"
+    assert FakeSyncIrodoriClient.instances[0].requests[0].ref_embed is None
 
 
 def test_read_aloud_remote_host_with_explicit_port_skips_default_port(
@@ -224,6 +318,7 @@ def test_read_aloud_remote_host_with_explicit_port_skips_default_port(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
@@ -249,6 +344,7 @@ def test_read_aloud_remote_host_with_https_prefix_preserves_scheme(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}
@@ -274,6 +370,7 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("一。\n二。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     save_dir = tmp_path / "wav"
     save_dir.mkdir()
     (save_dir / "segment-0000.wav").write_bytes(b"old-first")
@@ -309,22 +406,10 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
     assert (save_dir / "notes.txt").read_text(encoding="utf-8") == "keep me"
 
 
-def test_read_aloud_blank_narrator_caption_exits_with_error(tmp_path: Path) -> None:
-    turn_file = tmp_path / "turn.md"
-    turn_file.write_text("本文です。", encoding="utf-8")
-
-    result = CliRunner().invoke(
-        cli.app,
-        ["read-aloud", str(turn_file), "--narrator-caption", "   "],
-    )
-
-    assert result.exit_code != 0
-    assert "narrator caption must not be blank" in result.output
-
-
 def test_read_aloud_blank_remote_host_exits_with_error(tmp_path: Path) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
 
     result = CliRunner().invoke(
         cli.app,
@@ -341,6 +426,7 @@ def test_read_aloud_blank_player_command_exits_with_error(
 ) -> None:
     turn_file = tmp_path / "turn.md"
     turn_file.write_text("本文です。", encoding="utf-8")
+    write_speaker_manifest(tmp_path)
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
     FakeSyncIrodoriClient.wav_chunks_by_text = {"本文です。": [b"wav"]}

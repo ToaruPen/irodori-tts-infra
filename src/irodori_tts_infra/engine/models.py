@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Literal
 
 from irodori_tts_infra.contracts.synthesis import SynthesisRequest
-
-if TYPE_CHECKING:
-    from irodori_tts_infra.voice_bank.models import RVCProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,21 +16,32 @@ class SynthesizedAudio:
 class SynthesisJob:
     segment_index: int
     text: str
-    caption: str
-    num_steps: int = 30
+    speaker: str | None = None
+    ref_embed: str | None = None
+    require_speaker: bool = False
+    num_steps: int = 40
     cfg_scale_text: float = 3.0
-    cfg_scale_caption: float = 3.5
-    no_ref: bool = True
-    rvc: RVCProfile | None = None
+    cfg_scale_speaker: float = 5.0
+    seed: int | None = None
+    duration_scale: float = 1.0
+    num_candidates: int = 1
+    t_schedule_mode: Literal["linear", "sway"] = "linear"
+    sway_coeff: float = -1.0
 
-    def to_request(self) -> SynthesisRequest:
+    def to_request(self, *, ref_embed: str | None = None) -> SynthesisRequest:
+        resolved_ref_embed = ref_embed if ref_embed is not None else self.ref_embed
         return SynthesisRequest(
             text=self.text,
-            caption=self.caption,
+            speaker=self.speaker,
+            ref_embed=resolved_ref_embed,
             num_steps=self.num_steps,
             cfg_scale_text=self.cfg_scale_text,
-            cfg_scale_caption=self.cfg_scale_caption,
-            no_ref=self.no_ref,
+            cfg_scale_speaker=self.cfg_scale_speaker,
+            seed=self.seed,
+            duration_scale=self.duration_scale,
+            num_candidates=self.num_candidates,
+            t_schedule_mode=self.t_schedule_mode,
+            sway_coeff=self.sway_coeff,
         )
 
 

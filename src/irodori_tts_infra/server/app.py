@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import FastAPI
@@ -16,56 +16,63 @@ from irodori_tts_infra.server.routers.synthesis import router as synthesis_route
 _logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 
-
-@runtime_checkable
-class _WarmableBackend(Protocol):
-    def warm_up(self) -> None: ...
-
-
-@runtime_checkable
-class _ClosableBackend(Protocol):
-    def close(self) -> None: ...
+    PipelineFactory = Callable[[], SynthesisPipeline]
 
 
 def create_app(pipeline: SynthesisPipeline) -> FastAPI:
-    backend = pipeline.backend
-    voice_converter = pipeline.voice_converter
+    return create_app_from_factory(lambda: pipeline, initial_pipeline=pipeline)
 
+
+def create_app_from_factory(
+    pipeline_factory: PipelineFactory,
+    *,
+    initial_pipeline: SynthesisPipeline | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        pipeline = app.state.pipeline
+        if pipeline is None and initial_pipeline is None:
+            pipeline = await asyncio.to_thread(pipeline_factory)
+            app.state.pipeline = pipeline
+
+        if pipeline is None:
+            app.state.model_loaded = False
+            app.state.health_detail = "Synthesis pipeline is not configured"
+            yield
+            return
+
+        backend = pipeline.backend
         app.state.model_loaded = True
         app.state.health_detail = None
-        for component in (backend, voice_converter):
-            if component is None or not isinstance(component, _WarmableBackend):
-                continue
+
+        warm_up = getattr(backend, "warm_up", None)
+        if callable(warm_up):
+            warmup_ref_embed = str(pipeline.voice_profile.narrator.ref_embed)
             try:
-                await asyncio.to_thread(component.warm_up)
+                await asyncio.to_thread(warm_up, ref_embed=warmup_ref_embed)
             except BackendUnavailableError as exc:
                 app.state.model_loaded = False
                 app.state.health_detail = str(exc)
-                break
 
         try:
             yield
         finally:
-            for component in (voice_converter, backend):
-                if component is None or not isinstance(component, _ClosableBackend):
-                    continue
+            close = getattr(backend, "close", None)
+            if callable(close):
                 try:
-                    await asyncio.to_thread(component.close)
+                    await asyncio.to_thread(close)
                 except (BackendUnavailableError, OSError):
                     _logger.exception(
                         "pipeline component close failed",
-                        component=type(component).__name__,
+                        component=type(backend).__name__,
                     )
 
     app = FastAPI(lifespan=lifespan)
-    app.state.pipeline = pipeline
-    app.state.backend = backend
+    app.state.pipeline = initial_pipeline
     app.state.health_detail = None
     app.state.max_chunk_size = MAX_CHUNK_SIZE_BYTES
     app.state.model_loaded = False

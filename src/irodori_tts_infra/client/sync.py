@@ -71,7 +71,10 @@ class SyncIrodoriClient:
         response = self._request("POST", "/synthesize_batch", json=_json_body(request))
         return BatchSynthesisResult.model_validate_json(response.content)
 
-    def synthesize_stream(self, request: SynthesisRequest) -> Iterator[bytes]:
+    def synthesize_stream(
+        self,
+        request: SynthesisRequest | BatchSynthesisRequest,
+    ) -> Iterator[bytes]:
         health = self.health()
         try:
             with self._client.stream(

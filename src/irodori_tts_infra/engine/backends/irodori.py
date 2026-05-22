@@ -56,7 +56,7 @@ class _UnloadableRuntime(Protocol):
     def unload(self) -> None: ...
 
 
-class IrodoriVoiceDesignBackend:
+class IrodoriBaseBackend:
     def __init__(
         self,
         runtime: RuntimeLike,
@@ -81,16 +81,21 @@ class IrodoriVoiceDesignBackend:
 
     def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
         self._ensure_open()
+        if request.ref_embed is None or not request.ref_embed.strip():
+            msg = "synthesis ref_embed is required"
+            raise BackendUnavailableError(msg)
 
         sampling_request = self._sampling_request_cls(
             text=request.text,
-            caption=request.caption,
-            no_ref=request.no_ref,
+            ref_embed=request.ref_embed,
             num_steps=request.num_steps,
             cfg_scale_text=request.cfg_scale_text,
-            cfg_scale_caption=request.cfg_scale_caption,
-            # Verified against Irodori-TTS inference_runtime.py:
-            # decode_mode and context_kv_cache are SamplingRequest fields.
+            cfg_scale_speaker=request.cfg_scale_speaker,
+            seed=request.seed,
+            duration_scale=request.duration_scale,
+            num_candidates=request.num_candidates,
+            t_schedule_mode=request.t_schedule_mode,
+            sway_coeff=request.sway_coeff,
             decode_mode=self._settings.decode_mode,
             context_kv_cache=self._settings.context_kv_cache,
         )
@@ -99,15 +104,22 @@ class IrodoriVoiceDesignBackend:
         wav_bytes = self._save_result_to_wav_bytes(result.audio, sample_rate)
         return SynthesizedAudio(wav_bytes=wav_bytes, sample_rate=sample_rate)
 
-    def warm_up(self) -> None:
+    def warm_up(self, *, ref_embed: str | None = None) -> None:
         self._ensure_open()
+        if ref_embed is None or not ref_embed.strip():
+            msg = "warmup ref_embed is required"
+            raise BackendUnavailableError(msg)
         request = self._sampling_request_cls(
             text=self._settings.warmup_text,
-            caption=self._settings.warmup_caption,
-            no_ref=True,
+            ref_embed=ref_embed,
             num_steps=self._settings.warmup_num_steps,
             cfg_scale_text=self._settings.cfg_scale_text,
-            cfg_scale_caption=self._settings.cfg_scale_caption,
+            cfg_scale_speaker=self._settings.cfg_scale_speaker,
+            seed=self._settings.seed,
+            duration_scale=self._settings.duration_scale,
+            num_candidates=self._settings.num_candidates,
+            t_schedule_mode=self._settings.t_schedule_mode,
+            sway_coeff=self._settings.sway_coeff,
             decode_mode=self._settings.decode_mode,
             context_kv_cache=self._settings.context_kv_cache,
         )
@@ -154,7 +166,7 @@ def create_irodori_backend(
     runtime_key_cls: RuntimeKeyFactory | None = None,
     save_wav_fn: SaveWavFn | None = None,
     sampling_request_cls: RequestFactory | None = None,
-) -> IrodoriVoiceDesignBackend:
+) -> IrodoriBaseBackend:
     download_fn = hf_hub_download_fn or _import_hf_hub_download()
     inference_runtime = _import_inference_runtime_if_needed(
         runtime_factory=runtime_factory,
@@ -190,7 +202,7 @@ def create_irodori_backend(
         msg = "Failed to create Irodori backend"
         raise BackendUnavailableError(msg) from exc
 
-    return IrodoriVoiceDesignBackend(
+    return IrodoriBaseBackend(
         runtime=runtime,
         settings=settings,
         save_wav_fn=resolved_save_wav_fn,

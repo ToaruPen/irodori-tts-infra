@@ -91,7 +91,9 @@ def test_health_returns_contract_from_get_health() -> None:
 
 
 def test_synthesize_posts_request_and_returns_result() -> None:
-    synthesis_request = SynthesisRequest(text="こんにちは", caption="女性が話している。")
+    synthesis_request = SynthesisRequest(
+        text="こんにちは", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     synthesis_result = SynthesisResult(
         segment_index=0,
         wav_bytes=b"RIFF-single",
@@ -110,8 +112,16 @@ def test_synthesize_posts_request_and_returns_result() -> None:
 def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> None:
     batch_request = BatchSynthesisRequest(
         segments=[
-            SynthesisSegment(segment_index=0, text="地の文です。", caption="女性が読んでいる。"),
-            SynthesisSegment(segment_index=1, text="台詞です。", caption="男性が話している。"),
+            SynthesisSegment(
+                segment_index=0,
+                text="地の文です。",
+                ref_embed="speakers/narrator.speaker.safetensors",
+            ),
+            SynthesisSegment(
+                segment_index=1,
+                text="台詞です。",
+                ref_embed="speakers/narrator.speaker.safetensors",
+            ),
         ]
     )
     batch_result = BatchSynthesisResult(
@@ -132,7 +142,9 @@ def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> None:
 
 
 def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks() -> None:
-    synthesis_request = SynthesisRequest(text="長い本文です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     payloads = [b"RI", b"FF", b"-wav"]
     paths: list[str] = []
 
@@ -151,7 +163,9 @@ def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks()
 
 
 def test_synthesize_stream_yields_payload_before_response_completes() -> None:
-    synthesis_request = SynthesisRequest(text="長い本文です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     first_frame = (
         StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
         + StreamChunkHeader(segment_index=0, byte_length=2, final=False).to_bytes()
@@ -173,7 +187,9 @@ def test_synthesize_stream_yields_payload_before_response_completes() -> None:
 
 
 def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> None:
-    synthesis_request = SynthesisRequest(text="境界値です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="境界値です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     payloads = [b"", b"abcd"]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -221,7 +237,9 @@ def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> N
     ],
 )
 def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -253,7 +271,9 @@ def test_header_kind_ignores_non_string_kind(header: bytes) -> None:
     ],
 )
 def test_synthesize_stream_rejects_malformed_frames(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(text="壊れたフレームです。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="壊れたフレームです。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -275,7 +295,9 @@ def test_synthesize_stream_error_responses_map_to_typed_client_errors(
     status_code: int,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     error_payload = ErrorPayload(
         code="server_busy",
         message="server cannot accept work",
@@ -307,7 +329,9 @@ def test_synthesize_stream_open_failures_map_to_typed_client_errors(
     message: str,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -408,7 +432,9 @@ def test_sync_client_closes_owned_httpx_client() -> None:
 
 
 def test_sync_client_closes_owned_httpx_client_when_stream_health_fails() -> None:
-    synthesis_request = SynthesisRequest(text="本文です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="本文です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     error_payload = ErrorPayload(code="server_busy", message="server cannot accept work")
     paths: list[str] = []
 

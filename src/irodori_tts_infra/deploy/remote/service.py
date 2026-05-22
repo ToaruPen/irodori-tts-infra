@@ -25,15 +25,12 @@ def start_service(
 ) -> None:
     host = resolve_remote_host(remote_host)
     directory = resolve_remote_dir(remote_dir)
-    settings = ServerSettings()
-    resolved_server_host = server_host or settings.host
-    resolved_port = port or settings.port
     _run(
         [
             "ssh",
             host,
             _powershell(
-                _start_script(directory, server_host=resolved_server_host, port=resolved_port),
+                _start_script(directory, server_host=server_host, port=port),
             ),
         ],
     )
@@ -59,22 +56,64 @@ def status_service(
     return _run(["ssh", host, _powershell(_status_script(directory))], check=False)
 
 
-def _start_script(remote_dir: str, *, server_host: str, port: int) -> str:
+def _start_script(remote_dir: str, *, server_host: str | None, port: int | None) -> str:
     return (
         f"Set-Location -LiteralPath {_ps_quote(remote_dir)}; "
+        f"{_load_env_script()}"
+        f"{_server_bind_script(server_host=server_host, port=port)}"
         "$pidFile = Join-Path (Get-Location) '.uvicorn.pid'; "
+        "$runtimePython = Join-Path (Get-Location) '.runtime-venv/Scripts/python.exe'; "
         "if (Test-Path -LiteralPath $pidFile) { "
         "$pid = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue; "
         "if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) { "
         'Write-Output "running $pid"; exit 0 } }; '
-        "$process = Start-Process -FilePath 'uv' "
+        "$process = Start-Process -FilePath $runtimePython "
         "-ArgumentList @("
-        f"'run', 'uvicorn', '{_APP_TARGET}', "
-        f"'--host', {_ps_quote(server_host)}, '--port', '{port}'"
+        f"'-m', 'uvicorn', '{_APP_TARGET}', "
+        "'--host', $serverHost, '--port', $port"
         ") -PassThru -WindowStyle Hidden; "
         "Set-Content -LiteralPath $pidFile -Value $process.Id; "
         "Write-Output $process.Id"
     )
+
+
+def _load_env_script() -> str:
+    return (
+        "$envFile = Join-Path (Get-Location) '.env'; "
+        "if (Test-Path -LiteralPath $envFile) { "
+        "Get-Content -LiteralPath $envFile | ForEach-Object { "
+        "$line = $_.Trim(); "
+        "if ($line -and !$line.StartsWith('#')) { "
+        "$separator = $line.IndexOf('='); "
+        "if ($separator -gt 0) { "
+        "$name = $line.Substring(0, $separator).Trim(); "
+        "$value = $line.Substring($separator + 1).Trim().Trim('\"').Trim(\"'\"); "
+        "if ($name) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } "
+        "} } } }; "
+    )
+
+
+def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
+    settings = ServerSettings()
+    default_host = _ps_quote(settings.host)
+    default_port = _ps_quote(str(settings.port))
+    host_expr = (
+        _ps_quote(server_host)
+        if server_host is not None
+        else (
+            "if ($env:IRODORI_TTS_SERVER_HOST) "
+            f"{{ $env:IRODORI_TTS_SERVER_HOST }} else {{ {default_host} }}"
+        )
+    )
+    port_expr = (
+        _ps_quote(str(port))
+        if port is not None
+        else (
+            "if ($env:IRODORI_TTS_SERVER_PORT) "
+            f"{{ $env:IRODORI_TTS_SERVER_PORT }} else {{ {default_port} }}"
+        )
+    )
+    return f"$serverHost = {host_expr}; $port = {port_expr}; "
 
 
 def _stop_script(remote_dir: str) -> str:
