@@ -16,27 +16,47 @@ from pydantic import (
 
 class _ContractModel(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         populate_by_name=True,
         ser_json_bytes="base64",
         val_json_bytes="base64",
     )
 
 
+MAX_NUM_CANDIDATES = 4
+
+
 class SynthesisRequest(_ContractModel):
     text: str = Field(min_length=1)
-    caption: str = Field(min_length=1)
-    num_steps: int = Field(default=30, gt=0)
+    speaker: str | None = Field(default=None, min_length=1)
+    ref_embed: str | None = Field(default=None, min_length=1)
+    num_steps: int = Field(default=40, gt=0)
     cfg_scale_text: float = Field(default=3.0, gt=0.0)
-    cfg_scale_caption: float = Field(default=3.5, gt=0.0)
-    no_ref: bool = True
+    cfg_scale_speaker: float = Field(default=5.0, gt=0.0)
+    seed: int | None = None
+    duration_scale: float = Field(default=1.0, gt=0.0)
+    num_candidates: int = Field(default=1, gt=0, le=MAX_NUM_CANDIDATES)
+    t_schedule_mode: Literal["linear", "sway"] = "linear"
+    sway_coeff: float = -1.0
 
-    @field_validator("text", "caption")
+    @field_validator("text")
     @classmethod
     def _reject_blank_text(cls, value: str) -> str:
         if not value.strip():
             msg = "text fields must not be blank"
             raise ValueError(msg)
         return value
+
+    @field_validator("speaker", "ref_embed")
+    @classmethod
+    def _reject_blank_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "text fields must not be blank"
+            raise ValueError(msg)
+        return stripped
 
 
 class SynthesisSegment(SynthesisRequest):

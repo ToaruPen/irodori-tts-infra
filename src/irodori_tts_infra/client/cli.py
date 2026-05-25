@@ -15,18 +15,15 @@ from irodori_tts_infra.client.errors import ClientError
 from irodori_tts_infra.client.sync import SyncIrodoriClient
 from irodori_tts_infra.config import ClientSettings
 from irodori_tts_infra.contracts import SynthesisRequest
-from irodori_tts_infra.text import Segment, parse_turn_markdown
+from irodori_tts_infra.text import Segment, SegmentKind, parse_turn_markdown
 from irodori_tts_infra.voice_bank import (
-    DEFAULT_NARRATOR_CAPTION,
     find_characters_markdown,
+    find_speaker_manifest,
     load_voice_profile,
-    resolve_segment_caption,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
-
-    from irodori_tts_infra.voice_bank.models import VoiceProfile
 
 app = typer.Typer(no_args_is_help=True)
 AudioSegment = tuple[int, bytes]
@@ -78,7 +75,7 @@ def read_aloud(
             dir_okay=False,
             readable=True,
             resolve_path=True,
-            help="characters.md path. Defaults to discovery from the turn file.",
+            help="Optional characters.md path used only when validating a local speaker manifest.",
         ),
     ] = None,
     remote_host: Annotated[
@@ -88,11 +85,16 @@ def read_aloud(
             help="Override the Irodori server host or base URL.",
         ),
     ] = None,
-    narrator_caption: Annotated[
-        str | None,
+    speaker_manifest: Annotated[
+        Path | None,
         typer.Option(
-            "--narrator-caption",
-            help="VoiceDesign caption for narration segments.",
+            "--speaker-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Optional local voice_bank_speakers.toml validation path.",
         ),
     ] = None,
     save_dir: Annotated[
@@ -119,15 +121,15 @@ def read_aloud(
         message = "turn file contains no readable segments"
         raise typer.BadParameter(message)
 
-    profile = _load_profile(
+    _validate_optional_local_profile(
         turn_file=turn_file,
         characters=characters,
-        narrator_caption=narrator_caption,
+        speaker_manifest=speaker_manifest,
     )
     base_url = _base_url_from_remote_host(remote_host)
     try:
         with SyncIrodoriClient(base_url=base_url) as client:
-            audio_segments = _synthesize_audio_segments(client, segments, profile)
+            audio_segments = _synthesize_audio_segments(client, segments)
             if save_dir is not None:
                 saved = _save_audio_segments(audio_segments, save_dir)
                 typer.echo(f"Saved {saved} WAV file(s) to {save_dir}")
@@ -139,19 +141,23 @@ def read_aloud(
         raise typer.Exit(code=1) from exc
 
 
-def _load_profile(
+def _validate_optional_local_profile(
     *,
     turn_file: Path,
     characters: Path | None,
-    narrator_caption: str | None,
-) -> VoiceProfile:
-    caption = narrator_caption if narrator_caption is not None else DEFAULT_NARRATOR_CAPTION
-    if not caption.strip():
-        message = "narrator caption must not be blank"
-        raise typer.BadParameter(message)
-
+    speaker_manifest: Path | None,
+) -> None:
     characters_path = characters if characters is not None else find_characters_markdown(turn_file)
-    return load_voice_profile(characters_path, narrator_caption=caption)
+    manifest_path = (
+        speaker_manifest if speaker_manifest is not None else find_speaker_manifest(turn_file)
+    )
+    if manifest_path is None:
+        return
+    try:
+        load_voice_profile(characters_path, speaker_manifest=manifest_path)
+    except (OSError, TypeError, ValueError) as exc:
+        msg = f"invalid --speaker-manifest/--characters input: {exc}"
+        raise typer.BadParameter(msg) from exc
 
 
 def _base_url_from_remote_host(remote_host: str | None) -> str | None:
@@ -174,14 +180,13 @@ def _base_url_from_remote_host(remote_host: str | None) -> str | None:
 def _synthesize_audio_segments(
     client: SyncIrodoriClient,
     segments: list[Segment],
-    profile: VoiceProfile,
 ) -> Iterator[AudioSegment]:
     with Progress() as progress:
         task_id = progress.add_task("Synthesizing", total=len(segments))
         for segment_index, segment in enumerate(segments):
             request = SynthesisRequest(
                 text=segment.text,
-                caption=resolve_segment_caption(segment, profile),
+                speaker=_resolve_speaker(segment),
             )
             wav_bytes = b"".join(client.synthesize_stream(request))
             yield segment_index, wav_bytes
@@ -235,3 +240,12 @@ def _player_command_parts(player_command: str) -> list[str]:
         message = "player command must not be blank"
         raise typer.BadParameter(message)
     return parts
+
+
+def _resolve_speaker(segment: Segment) -> str | None:
+    if segment.kind == SegmentKind.NARRATION:
+        return None
+    if segment.speaker is None:
+        message = "dialogue speaker is required"
+        raise typer.BadParameter(message)
+    return segment.speaker

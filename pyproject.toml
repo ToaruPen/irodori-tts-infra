@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "irodori-tts-infra"
 version = "0.1.0"
-description = "Irodori-TTS + RVC voice conversion infrastructure for character-consistent Japanese novel TTS."
+description = "Irodori-TTS v3 base infrastructure for character-consistent Japanese novel TTS."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
   { name = "SankenBisha" },
 ]
-keywords = ["tts", "irodori", "rvc", "voice-conversion", "japanese"]
+keywords = ["tts", "irodori", "speaker-inversion", "japanese"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -45,11 +45,8 @@ metrics = [
   "prometheus-client>=0.21,<1",
 ]
 irodori = []
-rvc = [
-  "gradio_client>=1.4,<2",
-]
 all = [
-  "irodori-tts-infra[server,client,metrics,irodori,rvc]",
+  "irodori-tts-infra[server,client,metrics,irodori]",
 ]
 
 [project.scripts]
@@ -249,8 +246,6 @@ ignore_names = [
   "get_health",
   "main",
   "read_aloud",
-  "VoiceConverter",
-  "convert",
   "model_config",
   "model_loaded",
   "status",
@@ -262,6 +257,7 @@ ignore_names = [
   "traceback",
   "warm_up",
   "_normalize_aliases",
+  "_normalize_*",
   "_reject_*",
   "_serialize_*",
   "_validate_*",

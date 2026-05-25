@@ -14,8 +14,10 @@
 | Parameter | Default | Notes |
 |---|---|---|
 | `cfg_scale_text` | 3.0 | Higher = more text-faithful, may sound unnatural |
-| `cfg_scale_caption` | 3.0 | Higher = stronger style/emotion. Try 3.5-4.0 |
 | `cfg_scale_speaker` | 5.0 | Higher = more speaker identity consistency |
+| `duration_scale` | 1.0 | Higher = slower/longer delivery |
+| `t_schedule_mode` | linear | Use `sway` only when testing sway sampling behavior |
+| `sway_coeff` | -1.0 | Sway schedule coefficient |
 | `trim_tail` | True | Remove trailing silence |
 | `num_candidates` | 1 | Generate N candidates, pick best |
 
@@ -65,17 +67,20 @@
 
 Repeating an emoji strengthens its effect.
 
-## VoiceDesign Caption Best Practices
+## Speaker Inversion Embeddings
 
-Structure (2-3 sentences in Japanese):
-1. Speaker attributes: gender, age, pitch (e.g. "低い声の女性", "やや高めの男性")
-2. Emotion/state: current emotional tone
-3. Audio quality/distance: mic distance, environment
+Use `voice_bank_speakers.toml` to select `.speaker.safetensors` files:
 
-Examples:
-- `低い声の女性が、苛立ちを隠せない様子で焦って話している。クリアな音質。`
-- `落ち着いた女性の声で、近い距離感でやわらかく自然に読み上げてください。`
-- `やや高めの男性の声で、気遣いを見せて申し訳なさそうなトーンでやさしく話してほしい。`
+```toml
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."チヅル"]
+ref_embed = "speakers/chizuru.speaker.safetensors"
+```
+
+The synthesis path requires a narrator embedding and an explicit dialogue
+speaker that exists in the manifest. There is no generic fallback voice.
 
 ## Text Preprocessing (auto-applied by Irodori-TTS)
 

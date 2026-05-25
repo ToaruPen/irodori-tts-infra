@@ -1,21 +1,20 @@
 """Phase 2 end-to-end GPU smoke test.
 
 This gate verifies the real Phase 2 chain in one pytest process:
-Irodori VoiceDesign synthesis feeds RVC conversion for character dialogue.
+Irodori-TTS v3 base synthesis uses Speaker Inversion embeddings for narrator
+and character dialogue.
 
 Out of scope: HTTP routing, deployment orchestration, quality metrics,
 multi-character coverage, and long-form synthesis.
 
 Preconditions:
 - Run on the Windows GPU host.
-- The RVC sidecar is already running.
-- VOICE_BANK_DIR points to a voice bank with voice_bank_rvc.toml and characters.md.
-- At least one character in the voice bank has a populated RVCProfile.
+- VOICE_BANK_DIR points to a voice bank with voice_bank_speakers.toml and characters.md.
+- At least one character in the speaker manifest has a .speaker.safetensors embedding.
 - SMOKE_SPEAKER selects the character deterministically when the voice bank has
-  more than one RVC-enabled character. With exactly one, the sole character is
+  more than one character embedding. With exactly one, the sole character is
   picked automatically.
-- IRODORI_TTS_RUNTIME_* and IRODORI_RVC_SIDECAR_* environment variables are set
-  for the host runtime.
+- IRODORI_TTS_RUNTIME_* environment variables are set for the host runtime.
 
 Run:
     uv run pytest -m gpu tests/gpu/test_phase2_e2e_smoke.py -s
@@ -31,14 +30,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from irodori_tts_infra.config.settings import IrodoriRuntimeSettings, RVCSidecarSettings
+from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
 from irodori_tts_infra.engine.backends.irodori import create_irodori_backend
-from irodori_tts_infra.engine.backends.rvc import RVCConverter, create_rvc_backend
 from irodori_tts_infra.engine.errors import BackendUnavailableError
-from irodori_tts_infra.engine.models import PipelineConfig, SynthesizedAudio
+from irodori_tts_infra.engine.models import PipelineConfig
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.text.models import Segment, SegmentKind
-from irodori_tts_infra.voice_bank.models import RVCProfile, VoiceProfile
+from irodori_tts_infra.voice_bank.models import VoiceProfile
 from irodori_tts_infra.voice_bank.repository import load_voice_profile
 
 if TYPE_CHECKING:
@@ -51,23 +49,7 @@ pytestmark = [pytest.mark.gpu, pytest.mark.integration]
 EXPECTED_RESULT_COUNT = 2
 MAX_SMOKE_SECONDS = 300
 
-SmokeSetup = tuple[SynthesisPipeline, "_SpyVoiceConverter", VoiceProfile, str]
-
-
-class _SpyVoiceConverter:
-    def __init__(self, inner: RVCConverter) -> None:
-        self._inner = inner
-        self.convert_calls: list[RVCProfile] = []
-
-    def warm_up(self) -> None:
-        self._inner.warm_up()
-
-    def convert(self, audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
-        self.convert_calls.append(profile)
-        return self._inner.convert(audio, profile=profile)
-
-    def close(self) -> None:
-        self._inner.close()
+SmokeSetup = tuple[SynthesisPipeline, VoiceProfile, str]
 
 
 @pytest.fixture(scope="module")
@@ -76,18 +58,12 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
     smoke_character_name = _smoke_character_name(voice_profile)
 
     backend = None
-    rvc_converter = None
-    spy = None
     setup_completed = False
     try:
         try:
             irodori_settings = IrodoriRuntimeSettings()
-            rvc_settings = RVCSidecarSettings()
             backend = create_irodori_backend(irodori_settings)
-            rvc_converter = create_rvc_backend(rvc_settings)
-            spy = _SpyVoiceConverter(rvc_converter)
-            backend.warm_up()
-            spy.warm_up()
+            backend.warm_up(ref_embed=str(voice_profile.narrator.ref_embed))
             setup_completed = True
         except BackendUnavailableError as exc:
             pytest.skip(f"GPU smoke backend unavailable during setup: {exc}")
@@ -96,22 +72,12 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
             SynthesisPipeline(
                 backend,
                 voice_profile,
-                voice_converter=spy,
                 config=PipelineConfig(capacity=1),
             ),
-            spy,
             voice_profile,
             smoke_character_name,
         )
     finally:
-        if spy is not None:
-            _close_component("RVC converter", spy.close, setup_completed=setup_completed)
-        elif rvc_converter is not None:
-            _close_component(
-                "RVC converter",
-                rvc_converter.close,
-                setup_completed=setup_completed,
-            )
         if backend is not None:
             _close_component("Irodori backend", backend.close, setup_completed=setup_completed)
 
@@ -130,10 +96,10 @@ def _close_component(
             raise RuntimeError(msg) from exc
 
 
-def test_phase2_chain_dialogue_uses_rvc_and_narration_bypasses(
+def test_phase2_chain_uses_speaker_embeddings_for_dialogue_and_narration(
     phase2_smoke_setup: SmokeSetup,
 ) -> None:
-    pipeline, spy, voice_profile, smoke_character_name = phase2_smoke_setup
+    pipeline, _voice_profile, smoke_character_name = phase2_smoke_setup
     dialogue = Segment(
         kind=SegmentKind.DIALOGUE,
         speaker=smoke_character_name,
@@ -149,17 +115,14 @@ def test_phase2_chain_dialogue_uses_rvc_and_narration_bypasses(
     assert narration_result.segment_index == 1
 
     dialogue_nframes, dialogue_sample_rate = _decode_wav(dialogue_result)
-    narration_nframes, _ = _decode_wav(narration_result)
+    narration_nframes, narration_sample_rate = _decode_wav(narration_result)
     assert dialogue_nframes > 0
     assert narration_nframes > 0
     assert dialogue_result.elapsed_seconds > 0
     assert narration_result.elapsed_seconds > 0
 
-    assert len(spy.convert_calls) == 1
-    expected_profile = voice_profile.characters[smoke_character_name].rvc
-    assert expected_profile is not None
-    assert spy.convert_calls[0] is expected_profile
-    assert dialogue_sample_rate == expected_profile.sample_rate
+    assert dialogue_sample_rate > 0
+    assert narration_sample_rate > 0
 
     assert result.total_elapsed_seconds > 0
     assert result.total_elapsed_seconds < MAX_SMOKE_SECONDS
@@ -174,14 +137,14 @@ def _load_smoke_voice_profile() -> VoiceProfile:
     if not voice_bank_dir.is_dir():
         pytest.skip(f"VOICE_BANK_DIR does not resolve to a directory: {voice_bank_dir}")
 
-    rvc_manifest = voice_bank_dir / "voice_bank_rvc.toml"
+    speaker_manifest = voice_bank_dir / "voice_bank_speakers.toml"
     characters_md = voice_bank_dir / "characters.md"
-    if not rvc_manifest.is_file():
-        pytest.skip(f"VOICE_BANK_DIR is missing voice_bank_rvc.toml: {rvc_manifest}")
+    if not speaker_manifest.is_file():
+        pytest.skip(f"VOICE_BANK_DIR is missing voice_bank_speakers.toml: {speaker_manifest}")
     if not characters_md.is_file():
         pytest.skip(f"VOICE_BANK_DIR is missing characters.md: {characters_md}")
 
-    return load_voice_profile(characters_md=characters_md, rvc_manifest=rvc_manifest)
+    return load_voice_profile(characters_md=characters_md, speaker_manifest=speaker_manifest)
 
 
 def _smoke_character_name(voice_profile: VoiceProfile) -> str:
@@ -190,21 +153,17 @@ def _smoke_character_name(voice_profile: VoiceProfile) -> str:
         character = voice_profile.characters.get(explicit)
         if character is None:
             pytest.skip(f"SMOKE_SPEAKER={explicit!r} is not present in VOICE_BANK_DIR")
-        if character.rvc is None:
-            pytest.skip(f"SMOKE_SPEAKER={explicit!r} has no RVCProfile")
         return explicit
 
-    rvc_characters = sorted(
-        name for name, character in voice_profile.characters.items() if character.rvc is not None
-    )
-    if not rvc_characters:
-        pytest.skip("no trained RVC weights in VOICE_BANK_DIR; run RVC training SOP first")
-    if len(rvc_characters) > 1:
+    speaker_characters = sorted(voice_profile.characters)
+    if not speaker_characters:
+        pytest.skip("no speaker embeddings in VOICE_BANK_DIR")
+    if len(speaker_characters) > 1:
         pytest.skip(
-            "multiple RVC-enabled characters in VOICE_BANK_DIR "
-            f"({', '.join(rvc_characters)}); set SMOKE_SPEAKER to choose one"
+            "multiple speaker-embedding characters in VOICE_BANK_DIR "
+            f"({', '.join(speaker_characters)}); set SMOKE_SPEAKER to choose one"
         )
-    return rvc_characters[0]
+    return speaker_characters[0]
 
 
 def _decode_wav(result: SynthesisResult) -> tuple[int, int]:

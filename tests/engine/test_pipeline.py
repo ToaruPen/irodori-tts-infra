@@ -4,7 +4,6 @@ import subprocess  # noqa: S404
 import sys
 import threading
 import time
-from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING
 
@@ -21,16 +20,15 @@ from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.text.models import Segment, SegmentKind
 from irodori_tts_infra.voice_bank import (
     CharacterVoice,
-    RVCProfile,
+    SpeakerEmbeddingProfile,
     VoiceProfile,
-    resolve_segment_caption,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from irodori_tts_infra.contracts.synthesis import SynthesisRequest, SynthesisResult
-    from irodori_tts_infra.engine.protocols import Synthesizer, VoiceConverter
+    from irodori_tts_infra.engine.protocols import Synthesizer
 
 pytestmark = pytest.mark.unit
 
@@ -82,65 +80,19 @@ class BlockingSynthesizer:
         return self._release_events[call_index]
 
 
-class FakeVoiceConverter:
-    def __init__(
-        self,
-        *,
-        wav_bytes: bytes = b"RIFFconverted",
-        exception: Exception | None = None,
-    ) -> None:
-        self.calls: list[tuple[SynthesizedAudio, RVCProfile]] = []
-        self._wav_bytes = wav_bytes
-        self._exception = exception
-
-    def convert(self, audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
-        self.calls.append((audio, profile))
-        if self._exception is not None:
-            raise self._exception
-        return SynthesizedAudio(wav_bytes=self._wav_bytes, sample_rate=profile.sample_rate)
-
-
-class BlockingVoiceConverter:
-    def __init__(self, release_event: threading.Event) -> None:
-        self.calls: list[tuple[SynthesizedAudio, RVCProfile]] = []
-        self.enter_event = threading.Event()
-        self._release_event = release_event
-
-    def convert(self, audio: SynthesizedAudio, *, profile: RVCProfile) -> SynthesizedAudio:
-        self.calls.append((audio, profile))
-        self.enter_event.set()
-        self._release_event.wait()
-        return SynthesizedAudio(wav_bytes=b"RIFFconverted", sample_rate=profile.sample_rate)
-
-
-def rvc_profile() -> RVCProfile:
-    return RVCProfile(model_path=Path("models/mika.pth"), sample_rate=40_000)
-
-
 def profile() -> VoiceProfile:
     return VoiceProfile(
         characters={
             "ミカ": CharacterVoice(
                 name="ミカ",
-                caption="若い女性が、明るく楽しそうに話している。若々しい声。",
+                speaker=SpeakerEmbeddingProfile(
+                    "speakers/mika.speaker.safetensors",  # type: ignore[arg-type]
+                ),
             ),
         },
-        narrator_caption="落ち着いた大人の女性が読み上げている。",
-        generic_dialogue_caption="若い人が自然な口調で話している。",
-    )
-
-
-def profile_with_rvc(rvc: RVCProfile | None = None) -> VoiceProfile:
-    return VoiceProfile(
-        characters={
-            "ミカ": CharacterVoice(
-                name="ミカ",
-                caption="若い女性が、明るく楽しそうに話している。若々しい声。",
-                rvc=rvc if rvc is not None else rvc_profile(),
-            ),
-        },
-        narrator_caption="落ち着いた大人の女性が読み上げている。",
-        generic_dialogue_caption="若い人が自然な口調で話している。",
+        narrator=SpeakerEmbeddingProfile(
+            "speakers/narrator.speaker.safetensors",  # type: ignore[arg-type]
+        ),
     )
 
 
@@ -161,13 +113,11 @@ def make_pipeline(
     synthesizer: Synthesizer | None = None,
     *,
     voice_profile: VoiceProfile | None = None,
-    voice_converter: VoiceConverter | None = None,
     config: PipelineConfig | None = None,
 ) -> SynthesisPipeline:
     return SynthesisPipeline(
         synthesizer or FakeSynthesizer(),
         voice_profile or profile(),
-        voice_converter=voice_converter,
         config=config,
     )
 
@@ -176,7 +126,7 @@ def make_job(segment_index: int = 0) -> SynthesisJob:
     return SynthesisJob(
         segment_index=segment_index,
         text=f"本文{segment_index}",
-        caption="声の説明。",
+        ref_embed="speakers/narrator.speaker.safetensors",
     )
 
 
@@ -192,10 +142,6 @@ def wait_for_call(fake: BlockingSynthesizer, call_index: int) -> threading.Event
     event = fake.enter_events[call_index]
     wait_for(event, f"call {call_index} did not enter backend")
     return event
-
-
-def wait_for_converter_call(fake: BlockingVoiceConverter) -> None:
-    wait_for(fake.enter_event, "converter did not enter backend")
 
 
 def test_pipeline_exposes_backend() -> None:
@@ -268,44 +214,37 @@ def test_empty_batch_raises_empty_batch_error() -> None:
         pipeline.synthesize_batch([])
 
 
-def test_single_narration_segment_uses_narrator_caption() -> None:
+def test_single_narration_segment_uses_narrator_ref_embed() -> None:
     fake = FakeSynthesizer()
     pipeline = make_pipeline(fake)
 
     result = pipeline.synthesize_batch([narration()])
 
     assert result.results[0].segment_index == 0
-    assert fake.calls[0].caption == profile().narrator_caption
+    assert fake.calls[0].ref_embed == "speakers/narrator.speaker.safetensors"
 
 
-def test_single_dialogue_segment_uses_known_speaker_caption() -> None:
-    fake = FakeSynthesizer()
-    pipeline = make_pipeline(fake)
-    segment = dialogue()
-
-    pipeline.synthesize_batch([segment])
-
-    assert fake.calls[0].caption == resolve_segment_caption(segment, profile())
-
-
-def test_unknown_speaker_uses_generic_dialogue_caption() -> None:
+def test_single_dialogue_segment_uses_known_speaker_ref_embed() -> None:
     fake = FakeSynthesizer()
     pipeline = make_pipeline(fake)
 
-    pipeline.synthesize_batch([dialogue(speaker="不明")])
+    pipeline.synthesize_batch([dialogue()])
 
-    assert fake.calls[0].caption == profile().generic_dialogue_caption
+    assert fake.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
 
 
-def test_directed_dialogue_injects_direction_into_caption() -> None:
-    fake = FakeSynthesizer()
-    pipeline = make_pipeline(fake)
-    segment = dialogue(direction="小声で")
+def test_unknown_speaker_raises_backend_unavailable_error() -> None:
+    pipeline = make_pipeline()
 
-    pipeline.synthesize_batch([segment])
+    with pytest.raises(BackendUnavailableError, match="unknown dialogue speaker: 不明"):
+        pipeline.synthesize_batch([dialogue(speaker="不明")])
 
-    assert fake.calls[0].caption == resolve_segment_caption(segment, profile())
-    assert "小声で話している" in fake.calls[0].caption
+
+def test_dialogue_with_none_speaker_raises_backend_unavailable_error() -> None:
+    pipeline = make_pipeline()
+
+    with pytest.raises(BackendUnavailableError, match="dialogue speaker is required"):
+        pipeline.synthesize_batch([dialogue(speaker=None)])
 
 
 def test_ordering_preserves_submission_indices() -> None:
@@ -348,113 +287,6 @@ def test_backend_reraises_engine_error_unchanged() -> None:
     assert exc_info.value.__cause__ is None
 
 
-def test_pipeline_without_voice_converter_ignores_character_rvc() -> None:
-    synthesizer_audio = SynthesizedAudio(wav_bytes=b"RIFFvoice-design", sample_rate=24_000)
-    pipeline = make_pipeline(
-        FakeSynthesizer(responses=[FakeSynthResponse(audio=synthesizer_audio)]),
-        voice_profile=profile_with_rvc(),
-    )
-
-    result = pipeline.synthesize_batch([dialogue()])
-
-    assert result.results[0].wav_bytes == synthesizer_audio.wav_bytes
-
-
-def test_dialogue_with_character_rvc_runs_voice_design_then_converter() -> None:
-    synthesizer_audio = SynthesizedAudio(wav_bytes=b"RIFFvoice-design", sample_rate=24_000)
-    synthesizer = FakeSynthesizer(responses=[FakeSynthResponse(audio=synthesizer_audio)])
-    converter = FakeVoiceConverter(wav_bytes=b"RIFFrvc")
-    rvc = rvc_profile()
-    pipeline = make_pipeline(
-        synthesizer,
-        voice_profile=profile_with_rvc(rvc),
-        voice_converter=converter,
-    )
-
-    result = pipeline.synthesize_batch([dialogue()])
-
-    assert len(synthesizer.calls) == 1
-    assert converter.calls == [(synthesizer_audio, rvc)]
-    assert result.results[0].wav_bytes == b"RIFFrvc"
-
-
-def test_narration_never_routes_through_rvc() -> None:
-    converter = FakeVoiceConverter()
-    pipeline = make_pipeline(
-        voice_profile=profile_with_rvc(),
-        voice_converter=converter,
-    )
-
-    pipeline.synthesize_batch([narration()])
-
-    assert converter.calls == []
-
-
-def test_unknown_dialogue_speaker_never_routes_through_rvc() -> None:
-    converter = FakeVoiceConverter()
-    pipeline = make_pipeline(
-        voice_profile=profile_with_rvc(),
-        voice_converter=converter,
-    )
-
-    pipeline.synthesize_batch([dialogue(speaker="不明")])
-
-    assert converter.calls == []
-
-
-def test_dialogue_with_none_speaker_never_routes_through_rvc() -> None:
-    converter = FakeVoiceConverter()
-    pipeline = make_pipeline(
-        voice_profile=profile_with_rvc(),
-        voice_converter=converter,
-    )
-
-    pipeline.synthesize_batch([dialogue(speaker=None)])
-
-    assert converter.calls == []
-
-
-def test_character_without_rvc_never_routes_through_converter() -> None:
-    converter = FakeVoiceConverter()
-    pipeline = make_pipeline(voice_converter=converter)
-
-    pipeline.synthesize_batch([dialogue()])
-
-    assert converter.calls == []
-
-
-def test_voice_converter_reraises_backend_unavailable_error_unchanged() -> None:
-    error = BackendUnavailableError("rvc offline")
-    pipeline = make_pipeline(
-        voice_profile=profile_with_rvc(),
-        voice_converter=FakeVoiceConverter(exception=error),
-    )
-
-    with pytest.raises(BackendUnavailableError, match="rvc offline") as exc_info:
-        pipeline.synthesize_batch([dialogue()])
-
-    assert exc_info.value is error
-    assert exc_info.value.__cause__ is None
-    probe_available_capacity(pipeline)
-
-
-def test_voice_converter_wraps_non_engine_exception() -> None:
-    error = RuntimeError("rvc died")
-    pipeline = make_pipeline(
-        voice_profile=profile_with_rvc(),
-        voice_converter=FakeVoiceConverter(exception=error),
-    )
-
-    with pytest.raises(
-        BackendUnavailableError,
-        match="Backend voice conversion failed",
-    ) as exc_info:
-        pipeline.synthesize_batch([dialogue()])
-
-    assert exc_info.value.__cause__ is error
-    probe_available_capacity(pipeline)
-
-
 def test_capacity_one_serializes_concurrent_jobs_event_driven() -> None:
     release_event = threading.Event()
     fake = BlockingSynthesizer(release_events=[release_event] * CONCURRENT_JOB_COUNT)
@@ -470,31 +302,6 @@ def test_capacity_one_serializes_concurrent_jobs_event_driven() -> None:
 
     assert fake.max_in_flight == 1
     assert len(fake.calls) == CONCURRENT_JOB_COUNT
-
-
-def test_capacity_slot_is_held_until_chained_rvc_conversion_finishes() -> None:
-    converter_release = threading.Event()
-    synthesizer = BlockingSynthesizer()
-    converter = BlockingVoiceConverter(converter_release)
-    pipeline = make_pipeline(
-        synthesizer,
-        voice_profile=profile_with_rvc(),
-        voice_converter=converter,
-        config=PipelineConfig(acquire_timeout_seconds=0),
-    )
-    first, first_results = _run_in_thread(lambda: pipeline.synthesize_batch([dialogue("一")]))
-    wait_for_call(synthesizer, 0)
-    wait_for_converter_call(converter)
-
-    try:
-        with pytest.raises(BackpressureError, match="capacity"):
-            pipeline.synthesize_batch([dialogue("二")])
-        assert len(synthesizer.calls) == 1
-    finally:
-        converter_release.set()
-        _join_thread(first, first_results)
-
-    probe_available_capacity(pipeline)
 
 
 def test_semaphore_is_released_after_success() -> None:
@@ -654,7 +461,6 @@ def test_engine_import_is_lightweight() -> None:
         "import irodori_tts_infra.engine.backends.irodori\n"
         'blocked = {"irodori_tts", "huggingface_hub", "torch", "fastapi", "httpx", "uvicorn"}\n'
         "loaded = blocked & set(sys.modules)\n"
-        "print(loaded)\n"
         'assert not loaded, f"heavy modules loaded: {loaded}"\n'
     )
 
@@ -672,21 +478,29 @@ def test_synthesis_job_maps_to_contract_request() -> None:
     job = SynthesisJob(
         segment_index=3,
         text="本文",
-        caption="声の説明。",
+        ref_embed="speakers/mika.speaker.safetensors",
         num_steps=24,
         cfg_scale_text=2.5,
-        cfg_scale_caption=4.0,
-        no_ref=False,
+        cfg_scale_speaker=4.0,
+        seed=123,
+        duration_scale=1.1,
+        num_candidates=2,
+        t_schedule_mode="sway",
+        sway_coeff=-0.5,
     )
 
     request = job.to_request()
 
     assert request.text == job.text
-    assert request.caption == job.caption
+    assert request.ref_embed == job.ref_embed
     assert request.num_steps == job.num_steps
     assert request.cfg_scale_text == pytest.approx(job.cfg_scale_text)
-    assert request.cfg_scale_caption == pytest.approx(job.cfg_scale_caption)
-    assert request.no_ref is job.no_ref
+    assert request.cfg_scale_speaker == pytest.approx(job.cfg_scale_speaker)
+    assert request.seed == job.seed
+    assert request.duration_scale == pytest.approx(job.duration_scale)
+    assert request.num_candidates == job.num_candidates
+    assert request.t_schedule_mode == job.t_schedule_mode
+    assert request.sway_coeff == pytest.approx(job.sway_coeff)
 
 
 def test_synthesize_job_maps_backend_audio_to_contract_result() -> None:
@@ -707,6 +521,26 @@ def test_synthesize_job_maps_backend_audio_to_contract_result() -> None:
     assert result.elapsed_seconds >= 0
     assert result.content_type == "audio/wav"
     assert not hasattr(SynthesizedAudio(wav_bytes=b"x", sample_rate=1), "elapsed_seconds")
+
+
+@pytest.mark.parametrize("speaker", [None, "unknown"])
+def test_synthesize_job_explicit_ref_embed_bypasses_speaker_resolution(
+    speaker: str | None,
+) -> None:
+    fake = FakeSynthesizer()
+    pipeline = make_pipeline(fake)
+    job = SynthesisJob(
+        segment_index=0,
+        text="本文",
+        speaker=speaker,
+        ref_embed="speakers/explicit.speaker.safetensors",
+        require_speaker=True,
+    )
+
+    pipeline.synthesize_job(job)
+
+    assert len(fake.calls) == 1
+    assert fake.calls[0].ref_embed == "speakers/explicit.speaker.safetensors"
 
 
 def test_pipeline_config_validates_capacity_and_timeout() -> None:

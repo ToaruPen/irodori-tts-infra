@@ -65,7 +65,7 @@ def test_synthesize_returns_synthesis_result(
     with TestClient(app) as client:
         response = client.post(
             "/synthesize",
-            json={"text": "本文", "caption": "声の説明。"},
+            json={"text": "本文"},
         )
 
     assert response.status_code == status.HTTP_200_OK
@@ -73,6 +73,115 @@ def test_synthesize_returns_synthesis_result(
     assert result.segment_index == 0
     assert result.wav_bytes == b"RIFFsingle"
     assert result.content_type == "audio/wav"
+
+
+def test_synthesize_resolves_speaker_on_server_voice_profile(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    synthesizer = FakeSynthesizer(
+        responses=[
+            FakeSynthResponse(
+                audio=SynthesizedAudio(wav_bytes=b"RIFFspeaker", sample_rate=24_000),
+            ),
+        ],
+    )
+    app = create_app(pipeline_factory(synthesizer))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={"text": "本文", "speaker": "ミカ"},
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert synthesizer.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
+
+
+def test_synthesize_rejects_public_ref_embed(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={"text": "本文", "ref_embed": "speakers/client-local.speaker.safetensors"},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert response.json()["detail"] == "ref_embed is resolved server-side; send speaker instead"
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "payload"),
+    [
+        (
+            "/synthesize_batch",
+            {
+                "segments": [
+                    {
+                        "segment_index": 0,
+                        "text": "本文",
+                        "ref_embed": "speakers/client-local.speaker.safetensors",
+                    },
+                ],
+            },
+        ),
+        (
+            "/synthesize_stream",
+            {"text": "本文", "ref_embed": "speakers/client-local.speaker.safetensors"},
+        ),
+        (
+            "/synthesize_stream",
+            {
+                "segments": [
+                    {
+                        "segment_index": 0,
+                        "text": "本文",
+                        "ref_embed": "speakers/client-local.speaker.safetensors",
+                    },
+                ],
+            },
+        ),
+    ],
+)
+def test_batch_and_stream_reject_public_ref_embed(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    endpoint: str,
+    payload: dict[str, object],
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(endpoint, json=payload)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert response.json()["detail"] == "ref_embed is resolved server-side; send speaker instead"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("caption", "old VoiceDesign caption"),
+        ("cfg_scale_caption", 3.0),
+        ("no_ref", False),
+    ],
+)
+def test_synthesize_rejects_removed_voicedesign_fields(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    field: str,
+    value: object,
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={"text": "本文", field: value},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
 
 
 def test_synthesize_returns_200_for_empty_wav_bytes(
@@ -93,7 +202,7 @@ def test_synthesize_returns_200_for_empty_wav_bytes(
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
             "/synthesize",
-            json={"text": "本文", "caption": "声の説明。"},
+            json={"text": "本文"},
         )
 
     assert response.status_code == status.HTTP_200_OK
@@ -118,7 +227,7 @@ def test_synthesize_validation_error_returns_422(
     with TestClient(app) as client:
         response = client.post(
             "/synthesize",
-            json={"text": " ", "caption": "声の説明。"},
+            json={"text": " "},
         )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -139,7 +248,7 @@ def test_synthesize_maps_backend_unavailable_to_503(
     with TestClient(app) as client:
         response = client.post(
             "/synthesize",
-            json={"text": "本文", "caption": "声の説明。"},
+            json={"text": "本文"},
         )
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
@@ -163,7 +272,7 @@ def test_synthesize_maps_backpressure_to_429(
         def post_first() -> None:
             first_response["response"] = client.post(
                 "/synthesize",
-                json={"text": "一つ目", "caption": "声の説明。"},
+                json={"text": "一つ目"},
             )
 
         worker = threading.Thread(target=post_first)
@@ -172,7 +281,7 @@ def test_synthesize_maps_backpressure_to_429(
 
         second = client.post(
             "/synthesize",
-            json={"text": "二つ目", "caption": "声の説明。"},
+            json={"text": "二つ目"},
         )
 
         synthesizer.release.set()
@@ -207,8 +316,15 @@ def test_synthesize_batch_returns_ordered_results(
             "/synthesize_batch",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
-                    {"segment_index": 1, "text": "二つ目", "caption": "別の声。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
+                    {
+                        "segment_index": 1,
+                        "text": "二つ目",
+                        "speaker": "ミカ",
+                    },
                 ],
             },
         )
@@ -239,7 +355,10 @@ def test_synthesize_batch_returns_200_for_empty_wav_bytes(
             "/synthesize_batch",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
                 ],
             },
         )
@@ -279,7 +398,10 @@ def test_synthesize_batch_maps_backend_unavailable_to_503(
             "/synthesize_batch",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
                 ],
             },
         )
@@ -308,7 +430,10 @@ def test_synthesize_batch_maps_backpressure_to_429(
             "/synthesize_batch",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
                 ],
             },
         )
@@ -327,8 +452,14 @@ def test_synthesize_batch_rejects_unordered_segment_indices(
             "/synthesize_batch",
             json={
                 "segments": [
-                    {"segment_index": 1, "text": "二つ目", "caption": "声の説明。"},
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {
+                        "segment_index": 1,
+                        "text": "二つ目",
+                    },
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
                 ],
             },
         )
@@ -347,13 +478,49 @@ def test_synthesize_batch_validation_error_returns_422(
             "/synthesize_batch",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": " ", "caption": "声の説明。"},
+                    {
+                        "segment_index": 0,
+                        "text": " ",
+                    },
                 ],
             },
         )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     _assert_validation_error_mentions(response, "text", "blank")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("caption", "old VoiceDesign caption"),
+        ("cfg_scale_caption", 3.0),
+        ("no_ref", False),
+    ],
+)
+def test_synthesize_batch_rejects_removed_voicedesign_fields(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    field: str,
+    value: object,
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_batch",
+            json={
+                "segments": [
+                    {
+                        "segment_index": 0,
+                        "text": "本文",
+                        field: value,
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
 
 
 def test_synthesize_returns_500_when_pipeline_missing(
@@ -365,7 +532,7 @@ def test_synthesize_returns_500_when_pipeline_missing(
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
             "/synthesize",
-            json={"text": "本文", "caption": "声の説明。"},
+            json={"text": "本文"},
         )
 
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -396,8 +563,15 @@ def test_synthesize_stream_preserves_bytes_and_segment_order(
             "/synthesize_stream",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
-                    {"segment_index": 1, "text": "二つ目", "caption": "別の声。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
+                    {
+                        "segment_index": 1,
+                        "text": "二つ目",
+                        "speaker": "ミカ",
+                    },
                 ],
             },
         )
@@ -405,9 +579,9 @@ def test_synthesize_stream_preserves_bytes_and_segment_order(
     assert response.status_code == status.HTTP_200_OK
     handshake, chunks = _parse_stream(response.content)
     assert handshake.max_chunk_size == SPLIT_STREAM_CHUNK_SIZE
-    assert [header.segment_index for header, _ in chunks] == [0, 0, 1, 1]
+    assert [header.segment_index for header, _ in chunks] == [0, 1, 2, 3]
     assert [payload for _, payload in chunks] == [b"RIFF", b"zero", b"RIFF", b"one"]
-    assert [header.final for header, _ in chunks] == [False, True, False, True]
+    assert [header.final for header, _ in chunks] == [False, False, False, True]
     assert b"".join(payload for _, payload in chunks) == b"RIFFzeroRIFFone"
 
 
@@ -429,11 +603,7 @@ def test_synthesize_stream_emits_terminal_header_for_empty_wav_bytes(
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
             "/synthesize_stream",
-            json={
-                "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
-                ],
-            },
+            json={"text": "一つ目"},
         )
 
     assert response.status_code == status.HTTP_200_OK
@@ -445,6 +615,62 @@ def test_synthesize_stream_emits_terminal_header_for_empty_wav_bytes(
     assert header.final is True
     assert header.elapsed_seconds >= 0.0
     assert payload == b""
+
+
+def test_synthesize_stream_accepts_single_request(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(
+                responses=[
+                    FakeSynthResponse(
+                        audio=SynthesizedAudio(wav_bytes=b"RIFFsingle", sample_rate=24_000),
+                    ),
+                ],
+            ),
+        ),
+    )
+    app.state.max_chunk_size = SPLIT_STREAM_CHUNK_SIZE
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "text": "一つ目",
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    _, chunks = _parse_stream(response.content)
+    assert [header.segment_index for header, _ in chunks] == [0, 1, 2]
+    assert [payload for _, payload in chunks] == [b"RIFF", b"sing", b"le"]
+    assert [header.final for header, _ in chunks] == [False, False, True]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("caption", "old VoiceDesign caption"),
+        ("cfg_scale_caption", 3.0),
+        ("no_ref", False),
+    ],
+)
+def test_synthesize_stream_rejects_removed_voicedesign_fields(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    field: str,
+    value: object,
+) -> None:
+    app = create_app(pipeline_factory())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={"text": "本文", field: value},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
 
 
 def test_synthesize_stream_emits_terminal_on_backend_unavailable(
@@ -470,8 +696,15 @@ def test_synthesize_stream_emits_terminal_on_backend_unavailable(
             "/synthesize_stream",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
-                    {"segment_index": 1, "text": "二つ目", "caption": "別の声。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
+                    {
+                        "segment_index": 1,
+                        "text": "二つ目",
+                        "speaker": "ミカ",
+                    },
                 ],
             },
         )
@@ -480,7 +713,7 @@ def test_synthesize_stream_emits_terminal_on_backend_unavailable(
     _, chunks = _parse_stream(response.content)
     assert len(chunks) == MID_STREAM_ERROR_CHUNK_COUNT
     assert chunks[0][0].segment_index == 0
-    assert chunks[0][0].final is True
+    assert chunks[0][0].final is False
     assert chunks[0][0].error_code is None
     assert chunks[0][1] == b"RIFFok"
     error_chunks = [
@@ -520,8 +753,15 @@ def test_synthesize_stream_emits_terminal_on_backpressure(
             "/synthesize_stream",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
-                    {"segment_index": 1, "text": "二つ目", "caption": "別の声。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
+                    {
+                        "segment_index": 1,
+                        "text": "二つ目",
+                        "speaker": "ミカ",
+                    },
                 ],
             },
         )
@@ -530,7 +770,7 @@ def test_synthesize_stream_emits_terminal_on_backpressure(
     _, chunks = _parse_stream(response.content)
     assert len(chunks) == MID_STREAM_ERROR_CHUNK_COUNT
     assert chunks[0][0].segment_index == 0
-    assert chunks[0][0].final is True
+    assert chunks[0][0].final is False
     assert chunks[0][0].error_code is None
     assert chunks[0][1] == b"RIFFok"
     error_chunks = [
@@ -570,7 +810,10 @@ def test_synthesize_stream_rejects_invalid_max_chunk_size(
             "/synthesize_stream",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
                 ],
             },
         )
@@ -589,8 +832,14 @@ def test_synthesize_stream_invalid_unordered_segment_index(
             "/synthesize_stream",
             json={
                 "segments": [
-                    {"segment_index": 1, "text": "二つ目", "caption": "声の説明。"},
-                    {"segment_index": 0, "text": "一つ目", "caption": "声の説明。"},
+                    {
+                        "segment_index": 1,
+                        "text": "二つ目",
+                    },
+                    {
+                        "segment_index": 0,
+                        "text": "一つ目",
+                    },
                 ],
             },
         )
@@ -609,7 +858,10 @@ def test_synthesize_stream_invalid_blank_text(
             "/synthesize_stream",
             json={
                 "segments": [
-                    {"segment_index": 0, "text": " ", "caption": "声の説明。"},
+                    {
+                        "segment_index": 0,
+                        "text": " ",
+                    },
                 ],
             },
         )

@@ -36,8 +36,8 @@ C:\Users\user\irodori-tts-infra\.env
 ```
 
 The Windows `.env` should contain server/runtime settings such as
-`IRODORI_SERVER_PORT`, `IRODORI_RUNTIME_*`, and
-`IRODORI_PATH_TEMP_WAV_DIR`. Do not commit this file.
+`IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
+`IRODORI_TTS_PATH_TEMP_WAV_DIR`. Do not commit this file.
 
 ## Expected Layout
 
@@ -48,6 +48,7 @@ C:\Users\user\irodori-tts-infra\
   .env
   .env.example
   .uvicorn.pid
+  README.md
   pyproject.toml
   src\
     irodori_tts_infra\
@@ -68,25 +69,50 @@ irodori-tts-deploy deploy-stop
 ```
 
 `deploy-sync` prefers `rsync` over SSH. If `rsync` is unavailable locally, it
-creates the remote directory with `ssh` and copies `src/`, `pyproject.toml`, and
-`.env.example` with `scp`.
+creates the remote directory with `ssh` and copies `src/`, `README.md`,
+`pyproject.toml`, and `.env.example` with `scp`.
 
-`deploy-bootstrap` runs this on the Windows host:
+`deploy-bootstrap` creates a dedicated runtime venv and installs upstream
+Irodori-TTS plus this package:
 
 ```powershell
-uv sync --extra server --extra irodori
+uv venv '.runtime-venv' --python '3.11' --clear
+uv pip install --python .runtime-venv\Scripts\python.exe 'Irodori-TTS[cu128] @ file:///C:/path/to/Irodori-TTS'
+uv pip install --python .runtime-venv\Scripts\python.exe '.[server,irodori]'
+uv pip check --python .runtime-venv\Scripts\python.exe
 ```
 
-`deploy-start` launches:
+Override the upstream checkout, Python version, or Torch backend extra with:
+
+```bash
+irodori-tts-deploy deploy-bootstrap \
+  --irodori-tts-dir 'C:/path/to/Irodori-TTS' \
+  --python-version 3.11 \
+  --torch-backend-extra cu128
+```
+
+`deploy-start` loads `.env` from the deployed repository root into the process
+environment, then launches:
 
 ```powershell
-uv run uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port 8923
+.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port 8923
 ```
 
 The PID-file wrapper is intentionally minimal. If the server fails during import
-or startup, inspect the Windows shell environment and run the `uv run uvicorn ...`
-command manually for the full error output.
+or startup, inspect the Windows shell environment and run the `.runtime-venv`
+Python command manually for the full error output.
 
-## RVC Training
+## Voice Bank
 
-See the [RVC training SOP](rvc-training.md) for per-character RVC model training.
+The deployed voice bank must include `voice_bank_speakers.toml` and the
+referenced `.speaker.safetensors` files:
+
+```toml
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."チヅル"]
+ref_embed = "speakers/chizuru.speaker.safetensors"
+```
+
+RVC training is superseded for the standard path.

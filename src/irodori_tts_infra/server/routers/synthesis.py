@@ -33,6 +33,7 @@ MaxChunkSizeDependency = Annotated[int, Depends(get_max_chunk_size)]
 
 @router.post("/synthesize", response_model=SynthesisResult)
 def synthesize(request: SynthesisRequest, pipeline: PipelineDependency) -> SynthesisResult:
+    _reject_public_ref_embed(request)
     return pipeline.synthesize_job(_job_from_request(request, segment_index=0))
 
 
@@ -41,6 +42,7 @@ def synthesize_batch(
     request: BatchSynthesisRequest,
     pipeline: PipelineDependency,
 ) -> BatchSynthesisResult:
+    _reject_public_ref_embeds(request.segments)
     _validate_segment_order(request.segments)
     started = time.perf_counter()
     results = [pipeline.synthesize_job(_job_from_segment(segment)) for segment in request.segments]
@@ -52,14 +54,14 @@ def synthesize_batch(
 
 @router.post("/synthesize_stream")
 def synthesize_stream(
-    request: BatchSynthesisRequest,
+    request: SynthesisRequest | BatchSynthesisRequest,
     pipeline: PipelineDependency,
     max_chunk_size: MaxChunkSizeDependency,
 ) -> StreamingResponse:
     _validate_max_chunk_size(max_chunk_size)
-    _validate_segment_order(request.segments)
+    segments = _stream_segments(request)
     return StreamingResponse(
-        _frame_stream(request.segments, pipeline, max_chunk_size),
+        _frame_stream(segments, pipeline, max_chunk_size),
         media_type="application/octet-stream",
     )
 
@@ -70,33 +72,37 @@ def _frame_stream(
     max_chunk_size: int,
 ) -> Iterator[bytes]:
     yield StreamHandshakeHeader(max_chunk_size=max_chunk_size).to_bytes()
+    frame_index = 0
 
     for segment in segments:
+        is_last_segment = segment.segment_index == len(segments) - 1
         try:
             result = pipeline.synthesize_job(_job_from_segment(segment))
             chunks = _split_wav_bytes(result.wav_bytes, max_chunk_size)
             if not chunks:
                 yield StreamChunkHeader(
-                    segment_index=segment.segment_index,
+                    segment_index=frame_index,
                     byte_length=0,
-                    final=True,
+                    final=is_last_segment,
                     elapsed_seconds=result.elapsed_seconds,
                 ).to_bytes()
+                frame_index += 1
                 continue
             for chunk_offset, chunk in enumerate(chunks):
-                is_final = chunk_offset == len(chunks) - 1
+                is_final = is_last_segment and chunk_offset == len(chunks) - 1
                 yield StreamChunkHeader(
-                    segment_index=segment.segment_index,
+                    segment_index=frame_index,
                     byte_length=len(chunk),
                     final=is_final,
                     elapsed_seconds=result.elapsed_seconds,
                 ).to_bytes()
                 yield chunk
+                frame_index += 1
         except BackendUnavailableError:
-            yield _terminal_error_frame(segment.segment_index, "backend_unavailable")
+            yield _terminal_error_frame(frame_index, "backend_unavailable")
             return
         except BackpressureError:
-            yield _terminal_error_frame(segment.segment_index, "backpressure")
+            yield _terminal_error_frame(frame_index, "backpressure")
             return
 
 
@@ -136,15 +142,46 @@ def _validate_segment_order(segments: Sequence[SynthesisSegment]) -> None:
         raise HTTPException(status_code=422, detail=msg)
 
 
+def _stream_segments(request: SynthesisRequest | BatchSynthesisRequest) -> list[SynthesisSegment]:
+    if isinstance(request, BatchSynthesisRequest):
+        _reject_public_ref_embeds(request.segments)
+        _validate_segment_order(request.segments)
+        return request.segments
+    _reject_public_ref_embed(request)
+    return [
+        SynthesisSegment(
+            segment_index=0,
+            **request.model_dump(),
+        ),
+    ]
+
+
+def _reject_public_ref_embeds(segments: Sequence[SynthesisRequest]) -> None:
+    for segment in segments:
+        _reject_public_ref_embed(segment)
+
+
+def _reject_public_ref_embed(request: SynthesisRequest) -> None:
+    if request.ref_embed is None:
+        return
+    msg = "ref_embed is resolved server-side; send speaker instead"
+    raise HTTPException(status_code=422, detail=msg)
+
+
 def _job_from_request(request: SynthesisRequest, *, segment_index: int) -> SynthesisJob:
     return SynthesisJob(
         segment_index=segment_index,
         text=request.text,
-        caption=request.caption,
+        speaker=request.speaker,
+        ref_embed=request.ref_embed,
         num_steps=request.num_steps,
         cfg_scale_text=request.cfg_scale_text,
-        cfg_scale_caption=request.cfg_scale_caption,
-        no_ref=request.no_ref,
+        cfg_scale_speaker=request.cfg_scale_speaker,
+        seed=request.seed,
+        duration_scale=request.duration_scale,
+        num_candidates=request.num_candidates,
+        t_schedule_mode=request.t_schedule_mode,
+        sway_coeff=request.sway_coeff,
     )
 
 

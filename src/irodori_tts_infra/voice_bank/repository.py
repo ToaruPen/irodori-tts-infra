@@ -1,15 +1,13 @@
-"""RVC sidecar manifest schema.
+"""Speaker embedding manifest schema.
+
+    [narrator]
+    ref_embed = "speakers/narrator.speaker.safetensors"
 
     [characters.<name>]
-    model_path = "..."
-    sample_rate = 40000
-    neutral_prototype = "..."
+    ref_embed = "speakers/mika.speaker.safetensors"
 
-    [characters.<name>.state_prototypes]
-    happy = "..."
-
-Paths resolve relative to the TOML file. Manifest entries for characters absent
-from characters.md are rejected by load_voice_profile.
+Paths resolve relative to the TOML file. Manifest entries for characters absent from
+characters.md are rejected by load_voice_profile when characters.md is provided.
 """
 
 from __future__ import annotations
@@ -18,54 +16,61 @@ import tomllib
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, cast
 
-from irodori_tts_infra.voice_bank.captions import (
-    DEFAULT_GENERIC_DIALOGUE_CAPTION,
-    DEFAULT_NARRATOR_CAPTION,
-    load_characters_markdown,
+from irodori_tts_infra.voice_bank.captions import load_characters_markdown
+from irodori_tts_infra.voice_bank.models import (
+    CharacterVoice,
+    SpeakerEmbeddingProfile,
+    VoiceProfile,
 )
-from irodori_tts_infra.voice_bank.models import CharacterVoice, RVCProfile, VoiceProfile
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-RVC_MANIFEST_FILENAME = "voice_bank_rvc.toml"
+SPEAKER_MANIFEST_FILENAME = "voice_bank_speakers.toml"
 
 
 def find_characters_markdown(turn_file: Path) -> Path | None:
     return _find_upwards(turn_file, "characters.md")
 
 
-def find_rvc_manifest(turn_file: Path) -> Path | None:
-    return _find_upwards(turn_file, RVC_MANIFEST_FILENAME)
+def find_speaker_manifest(turn_file: Path) -> Path | None:
+    return _find_upwards(turn_file, SPEAKER_MANIFEST_FILENAME)
 
 
 def load_voice_profile(
     characters_md: Path | None,
     *,
-    narrator_caption: str = DEFAULT_NARRATOR_CAPTION,
-    generic_dialogue_caption: str = DEFAULT_GENERIC_DIALOGUE_CAPTION,
-    rvc_manifest: Path | None = None,
+    speaker_manifest: Path | None = None,
 ) -> VoiceProfile:
-    characters: dict[str, CharacterVoice] = {}
-    if characters_md is not None and characters_md.is_file():
-        characters = load_characters_markdown(characters_md.read_text(encoding="utf-8"))
+    if speaker_manifest is None:
+        msg = "speaker manifest is required"
+        raise ValueError(msg)
 
-    if rvc_manifest is not None:
-        rvc_profiles = _load_rvc_manifest(rvc_manifest)
-        unknown_names = sorted(set(rvc_profiles) - set(characters))
-        if unknown_names:
-            msg = (
-                "RVC manifest contains characters not present in characters.md: "
-                f"{', '.join(unknown_names)}"
-            )
+    known_names: set[str] = set()
+    resolved_characters_md = None
+    if characters_md is not None:
+        if not characters_md.exists():
+            msg = f"characters_md path does not exist: {characters_md}"
             raise ValueError(msg)
-        characters = _merge_rvc_profiles(characters, rvc_profiles)
+        if not characters_md.is_file():
+            msg = f"characters_md path is not a file: {characters_md}"
+            raise ValueError(msg)
+        resolved_characters_md = characters_md
+    if resolved_characters_md is not None:
+        known_names = load_characters_markdown(
+            resolved_characters_md.read_text(encoding="utf-8"),
+        )
 
-    return VoiceProfile(
-        characters=characters,
-        narrator_caption=narrator_caption,
-        generic_dialogue_caption=generic_dialogue_caption,
-    )
+    narrator, characters = _load_speaker_manifest(speaker_manifest)
+    unknown_names = sorted(set(characters) - known_names) if resolved_characters_md else []
+    if unknown_names:
+        msg = (
+            "speaker manifest contains characters not present in characters.md: "
+            f"{', '.join(unknown_names)}"
+        )
+        raise ValueError(msg)
+
+    return VoiceProfile(characters=characters, narrator=narrator)
 
 
 def _find_upwards(turn_file: Path, filename: str) -> Path | None:
@@ -80,74 +85,44 @@ def _find_upwards(turn_file: Path, filename: str) -> Path | None:
     return None
 
 
-def _load_rvc_manifest(manifest: Path) -> dict[str, RVCProfile]:
+def _load_speaker_manifest(
+    manifest: Path,
+) -> tuple[SpeakerEmbeddingProfile, dict[str, CharacterVoice]]:
     data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    if "narrator" not in data:
+        msg = "narrator is required"
+        raise ValueError(msg)
+
+    narrator_table = _as_table(data["narrator"], "narrator")
+    if "characters" in narrator_table:
+        msg = "narrator.characters is invalid; define characters at top level"
+        raise ValueError(msg)
+    narrator = _parse_speaker_profile(
+        narrator_table,
+        context="narrator",
+        base_dir=manifest.parent,
+    )
     character_tables = _as_table(data.get("characters", {}), "characters")
-    profiles: dict[str, RVCProfile] = {}
+    characters: dict[str, CharacterVoice] = {}
     for name, value in character_tables.items():
-        profiles[name] = _parse_rvc_profile(
-            name,
+        speaker = _parse_speaker_profile(
             _as_table(value, f"characters.{name}"),
+            context=f"characters.{name}",
             base_dir=manifest.parent,
         )
-    return profiles
+        characters[name] = CharacterVoice(name=name, speaker=speaker)
+    return narrator, characters
 
 
-def _parse_rvc_profile(
-    name: str,
+def _parse_speaker_profile(
     table: Mapping[str, object],
     *,
+    context: str,
     base_dir: Path,
-) -> RVCProfile:
-    neutral_prototype = table.get("neutral_prototype")
-    if neutral_prototype is not None and not isinstance(neutral_prototype, str):
-        msg = f"characters.{name}.neutral_prototype must be a string"
-        raise TypeError(msg)
-
-    return RVCProfile(
-        model_path=_required_path(table, "model_path", f"characters.{name}", base_dir=base_dir),
-        sample_rate=_required_int(table, "sample_rate", f"characters.{name}"),
-        neutral_prototype=(
-            _resolve_manifest_path(neutral_prototype, base_dir=base_dir)
-            if neutral_prototype is not None
-            else None
-        ),
-        state_prototypes=_state_prototypes(name, table, base_dir=base_dir),
+) -> SpeakerEmbeddingProfile:
+    return SpeakerEmbeddingProfile(
+        ref_embed=_required_path(table, "ref_embed", context, base_dir=base_dir),
     )
-
-
-def _state_prototypes(
-    name: str,
-    table: Mapping[str, object],
-    *,
-    base_dir: Path,
-) -> dict[str, Path]:
-    raw_state_prototypes = table.get("state_prototypes", {})
-    state_prototypes = _as_table(
-        raw_state_prototypes,
-        f"characters.{name}.state_prototypes",
-    )
-    return {
-        state: _resolve_manifest_path(
-            _string_value(value, f"characters.{name}.state_prototypes.{state}"),
-            base_dir=base_dir,
-        )
-        for state, value in state_prototypes.items()
-    }
-
-
-def _merge_rvc_profiles(
-    characters: Mapping[str, CharacterVoice],
-    rvc_profiles: Mapping[str, RVCProfile],
-) -> dict[str, CharacterVoice]:
-    return {
-        name: CharacterVoice(
-            name=character.name,
-            caption=character.caption,
-            rvc=rvc_profiles.get(name, character.rvc),
-        )
-        for name, character in characters.items()
-    }
 
 
 def _required_path(
@@ -163,17 +138,6 @@ def _required_path(
     )
 
 
-def _required_int(table: Mapping[str, object], key: str, context: str) -> int:
-    value = table.get(key)
-    if value is None:
-        msg = f"{context}.{key} is required"
-        raise ValueError(msg)
-    if not isinstance(value, int) or isinstance(value, bool):
-        msg = f"{context}.{key} must be an integer"
-        raise TypeError(msg)
-    return value
-
-
 def _string_value(value: object, context: str) -> str:
     if value is None:
         msg = f"{context} is required"
@@ -181,6 +145,9 @@ def _string_value(value: object, context: str) -> str:
     if not isinstance(value, str):
         msg = f"{context} must be a string"
         raise TypeError(msg)
+    if not value.strip():
+        msg = f"{context} must not be blank"
+        raise ValueError(msg)
     return value
 
 

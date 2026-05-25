@@ -14,7 +14,7 @@ from irodori_tts_infra.contracts.synthesis import SynthesisRequest
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.backends.irodori import (
     INSTALL_HINT,
-    IrodoriVoiceDesignBackend,
+    IrodoriBaseBackend,
     _runtime_factory,  # noqa: PLC2701
     _runtime_key_cls,  # noqa: PLC2701
     _sampling_request_cls,  # noqa: PLC2701
@@ -25,7 +25,7 @@ from irodori_tts_infra.engine.errors import BackendUnavailableError
 from irodori_tts_infra.engine.models import SynthesizedAudio
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.text.models import Segment, SegmentKind
-from irodori_tts_infra.voice_bank import CharacterVoice, VoiceProfile
+from irodori_tts_infra.voice_bank import CharacterVoice, SpeakerEmbeddingProfile, VoiceProfile
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,15 +39,21 @@ pytestmark = pytest.mark.unit
 
 FAKE_WAV_BYTES = b"RIFF\x08\x00\x00\x00WAVEfake"
 DEFAULT_SAMPLE_RATE = 24_000
-DEFAULT_NUM_STEPS = 30
+DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
-DEFAULT_CFG_SCALE_CAPTION = 3.5
+DEFAULT_CFG_SCALE_SPEAKER = 5.0
 CUSTOM_STEPS = 12
 CUSTOM_CFG_TEXT = 2.25
-CUSTOM_CFG_CAPTION = 4.25
+CUSTOM_CFG_SPEAKER = 4.25
+CUSTOM_SEED = 123
+CUSTOM_DURATION_SCALE = 1.25
+CUSTOM_NUM_CANDIDATES = 2
+CUSTOM_SWAY_COEFF = -0.5
 WARMUP_STEPS = 5
 MODEL_PATH = "downloaded/model.safetensors"
 CUSTOM_MODEL_PATH = "downloaded/custom.safetensors"
+DEFAULT_REF_EMBED = "speakers/mika.speaker.safetensors"
+NARRATOR_REF_EMBED = "speakers/narrator.speaker.safetensors"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,22 +64,30 @@ class FakeRuntimeResult:
 
 class FakeSamplingRequest:
     text: str
-    caption: str
-    no_ref: bool
+    ref_embed: str
     num_steps: int
     cfg_scale_text: float
-    cfg_scale_caption: float
+    cfg_scale_speaker: float
+    seed: int | None
+    duration_scale: float
+    num_candidates: int
+    t_schedule_mode: str
+    sway_coeff: float
     decode_mode: str
     context_kv_cache: bool
 
     def __init__(self, **kwargs: object) -> None:
         self.kwargs = kwargs
         self.text = cast("str", kwargs.get("text", ""))
-        self.caption = cast("str", kwargs.get("caption", ""))
-        self.no_ref = cast("bool", kwargs.get("no_ref", False))
+        self.ref_embed = cast("str", kwargs.get("ref_embed", ""))
         self.num_steps = cast("int", kwargs.get("num_steps", 0))
         self.cfg_scale_text = cast("float", kwargs.get("cfg_scale_text", 0.0))
-        self.cfg_scale_caption = cast("float", kwargs.get("cfg_scale_caption", 0.0))
+        self.cfg_scale_speaker = cast("float", kwargs.get("cfg_scale_speaker", 0.0))
+        self.seed = cast("int | None", kwargs.get("seed"))
+        self.duration_scale = cast("float", kwargs.get("duration_scale", 0.0))
+        self.num_candidates = cast("int", kwargs.get("num_candidates", 0))
+        self.t_schedule_mode = cast("str", kwargs.get("t_schedule_mode", ""))
+        self.sway_coeff = cast("float", kwargs.get("sway_coeff", 0.0))
         self.decode_mode = cast("str", kwargs.get("decode_mode", ""))
         self.context_kv_cache = cast("bool", kwargs.get("context_kv_cache", False))
 
@@ -174,14 +188,13 @@ def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
         "checkpoint": "org/model",
         "num_steps": DEFAULT_NUM_STEPS,
         "cfg_scale_text": DEFAULT_CFG_SCALE_TEXT,
-        "cfg_scale_caption": DEFAULT_CFG_SCALE_CAPTION,
+        "cfg_scale_speaker": DEFAULT_CFG_SCALE_SPEAKER,
         "model_device": "cuda",
         "model_precision": "bf16",
         "codec_device": "cuda",
         "codec_precision": "fp32",
         "warmup_num_steps": DEFAULT_NUM_STEPS,
         "warmup_text": "テスト",
-        "warmup_caption": "女性が話している。",
         "decode_mode": "batch",
         "context_kv_cache": True,
         "compile_model": False,
@@ -193,11 +206,15 @@ def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
 def synthesis_request(**overrides: object) -> SynthesisRequest:
     data: dict[str, object] = {
         "text": "本文です。",
-        "caption": "女性が自然に話している。",
+        "ref_embed": DEFAULT_REF_EMBED,
         "num_steps": CUSTOM_STEPS,
         "cfg_scale_text": CUSTOM_CFG_TEXT,
-        "cfg_scale_caption": CUSTOM_CFG_CAPTION,
-        "no_ref": False,
+        "cfg_scale_speaker": CUSTOM_CFG_SPEAKER,
+        "seed": CUSTOM_SEED,
+        "duration_scale": CUSTOM_DURATION_SCALE,
+        "num_candidates": CUSTOM_NUM_CANDIDATES,
+        "t_schedule_mode": "sway",
+        "sway_coeff": CUSTOM_SWAY_COEFF,
     }
     data.update(overrides)
     return SynthesisRequest.model_validate(data)
@@ -212,8 +229,8 @@ def make_backend(
     *,
     settings: IrodoriRuntimeSettings | None = None,
     save_wav_fn: Callable[[str, object, int], None] = fake_save_wav,
-) -> IrodoriVoiceDesignBackend:
-    return IrodoriVoiceDesignBackend(
+) -> IrodoriBaseBackend:
+    return IrodoriBaseBackend(
         runtime=runtime or FakeRuntime(),
         settings=settings or runtime_settings(),
         save_wav_fn=save_wav_fn,
@@ -226,16 +243,15 @@ def make_profile() -> VoiceProfile:
         characters={
             "ミカ": CharacterVoice(
                 name="ミカ",
-                caption="若い女性が明るく話している。",
+                speaker=SpeakerEmbeddingProfile(DEFAULT_REF_EMBED),  # type: ignore[arg-type]
             ),
         },
-        narrator_caption="落ち着いた声で読み上げている。",
-        generic_dialogue_caption="自然な口調で話している。",
+        narrator=SpeakerEmbeddingProfile(NARRATOR_REF_EMBED),  # type: ignore[arg-type]
     )
 
 
 def test_backend_implements_synthesizer_protocol() -> None:
-    synth: Synthesizer = IrodoriVoiceDesignBackend(
+    synth: Synthesizer = IrodoriBaseBackend(
         runtime=FakeRuntime(),
         settings=runtime_settings(),
         save_wav_fn=fake_save_wav,
@@ -254,13 +270,26 @@ def test_synthesize_forwards_sampling_request_fields() -> None:
 
     call = runtime.calls[0]
     assert call.text == "本文です。"
-    assert call.caption == "女性が自然に話している。"
+    assert call.ref_embed == DEFAULT_REF_EMBED
     assert call.num_steps == CUSTOM_STEPS
     assert call.cfg_scale_text == pytest.approx(CUSTOM_CFG_TEXT)
-    assert call.cfg_scale_caption == pytest.approx(CUSTOM_CFG_CAPTION)
-    assert call.no_ref is False
+    assert call.cfg_scale_speaker == pytest.approx(CUSTOM_CFG_SPEAKER)
+    assert call.seed == CUSTOM_SEED
+    assert call.duration_scale == pytest.approx(CUSTOM_DURATION_SCALE)
+    assert call.num_candidates == CUSTOM_NUM_CANDIDATES
+    assert call.t_schedule_mode == "sway"
+    assert call.sway_coeff == pytest.approx(CUSTOM_SWAY_COEFF)
     assert call.decode_mode == "sequential"
     assert call.context_kv_cache is False
+
+
+def test_synthesize_normalizes_ref_embed_before_sampling_request() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.synthesize(synthesis_request(ref_embed=f"  {DEFAULT_REF_EMBED}  "))
+
+    assert runtime.calls[0].ref_embed == DEFAULT_REF_EMBED
 
 
 def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:
@@ -306,21 +335,37 @@ def test_temp_wav_file_is_deleted_when_save_wav_raises() -> None:
     assert not paths[0].exists()
 
 
-def test_warm_up_uses_warmup_settings() -> None:
+def test_warm_up_requires_ref_embed() -> None:
+    backend = make_backend()
+
+    with pytest.raises(BackendUnavailableError, match="warmup ref_embed is required"):
+        backend.warm_up()
+
+
+def test_warm_up_uses_warmup_settings_and_ref_embed() -> None:
     runtime = FakeRuntime()
     settings = runtime_settings(
         warmup_text="準備です。",
-        warmup_caption="落ち着いて話している。",
         warmup_num_steps=WARMUP_STEPS,
     )
     backend = make_backend(runtime, settings=settings)
 
-    backend.warm_up()
+    backend.warm_up(ref_embed=NARRATOR_REF_EMBED)
 
     call = runtime.calls[0]
     assert call.text == "準備です。"
-    assert call.caption == "落ち着いて話している。"
+    assert call.ref_embed == NARRATOR_REF_EMBED
     assert call.num_steps == WARMUP_STEPS
+    assert call.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+
+
+def test_warm_up_normalizes_ref_embed_before_sampling_request() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.warm_up(ref_embed=f"  {NARRATOR_REF_EMBED}  ")
+
+    assert runtime.calls[0].ref_embed == NARRATOR_REF_EMBED
 
 
 def test_close_marks_backend_unavailable() -> None:
@@ -398,7 +443,7 @@ def test_factory_uses_injected_download_and_runtime_factory() -> None:
         sampling_request_cls=FakeSamplingRequest,
     )
 
-    assert isinstance(backend, IrodoriVoiceDesignBackend)
+    assert isinstance(backend, IrodoriBaseBackend)
     assert download_calls == [{"repo_id": "org/model", "filename": "model.safetensors"}]
     assert runtime_keys[0].checkpoint == MODEL_PATH
     assert runtime_keys[0].model_device == "cuda"
@@ -548,7 +593,6 @@ def test_importing_irodori_backend_is_lightweight() -> None:
         "import irodori_tts_infra.engine.backends.irodori\n"
         "blocked = {'irodori_tts', 'huggingface_hub', 'torch'}\n"
         "loaded = blocked & set(sys.modules)\n"
-        "print(loaded)\n"
         "assert not loaded, f'heavy modules loaded: {loaded}'\n"
     )
     env = os.environ.copy()
@@ -578,11 +622,14 @@ def test_importing_irodori_backend_is_lightweight() -> None:
         ("context_kv_cache", "sampling_request"),
         ("num_steps", "sampling_request"),
         ("cfg_scale_text", "sampling_request"),
-        ("cfg_scale_caption", "sampling_request"),
-        ("no_ref", "sampling_request"),
+        ("cfg_scale_speaker", "sampling_request"),
+        ("seed", "sampling_request"),
+        ("duration_scale", "sampling_request"),
+        ("num_candidates", "sampling_request"),
+        ("t_schedule_mode", "sampling_request"),
+        ("sway_coeff", "sampling_request"),
         ("warmup_num_steps", "warmup_request"),
         ("warmup_text", "warmup_request"),
-        ("warmup_caption", "warmup_request"),
     ],
 )
 def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str) -> None:
@@ -597,7 +644,6 @@ def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str)
         context_kv_cache=False,
         warmup_num_steps=7,
         warmup_text="ウォームアップ本文。",
-        warmup_caption="ウォームアップ声。",
     )
     download_calls: list[dict[str, object]] = []
     runtime_keys: list[FakeRuntimeKey] = []
@@ -625,11 +671,15 @@ def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str)
         synthesis_request(
             num_steps=11,
             cfg_scale_text=1.5,
-            cfg_scale_caption=2.5,
-            no_ref=True,
+            cfg_scale_speaker=2.5,
+            seed=987,
+            duration_scale=1.5,
+            num_candidates=3,
+            t_schedule_mode="sway",
+            sway_coeff=-0.25,
         ),
     )
-    backend.warm_up()
+    backend.warm_up(ref_embed=NARRATOR_REF_EMBED)
 
     expected = {
         "checkpoint": ("custom/repo", download_calls[0]["repo_id"]),
@@ -642,11 +692,14 @@ def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str)
         "context_kv_cache": (False, runtime.calls[0].context_kv_cache),
         "num_steps": (11, runtime.calls[0].num_steps),
         "cfg_scale_text": (1.5, runtime.calls[0].cfg_scale_text),
-        "cfg_scale_caption": (2.5, runtime.calls[0].cfg_scale_caption),
-        "no_ref": (True, runtime.calls[0].no_ref),
+        "cfg_scale_speaker": (2.5, runtime.calls[0].cfg_scale_speaker),
+        "seed": (987, runtime.calls[0].seed),
+        "duration_scale": (1.5, runtime.calls[0].duration_scale),
+        "num_candidates": (3, runtime.calls[0].num_candidates),
+        "t_schedule_mode": ("sway", runtime.calls[0].t_schedule_mode),
+        "sway_coeff": (-0.25, runtime.calls[0].sway_coeff),
         "warmup_num_steps": (7, runtime.calls[1].num_steps),
         "warmup_text": ("ウォームアップ本文。", runtime.calls[1].text),
-        "warmup_caption": ("ウォームアップ声。", runtime.calls[1].caption),
     }
 
     assert consumer in {"hf_hub_download", "runtime_key", "sampling_request", "warmup_request"}
@@ -657,13 +710,17 @@ def test_contract_mapping_defaults_round_trip() -> None:
     runtime = FakeRuntime()
     backend = make_backend(runtime)
 
-    backend.synthesize(SynthesisRequest(text="本文", caption="声"))
+    backend.synthesize(SynthesisRequest(text="本文", ref_embed=DEFAULT_REF_EMBED))
 
     call = runtime.calls[0]
     assert call.num_steps == DEFAULT_NUM_STEPS
     assert call.cfg_scale_text == pytest.approx(DEFAULT_CFG_SCALE_TEXT)
-    assert call.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
-    assert call.no_ref is True
+    assert call.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+    assert call.seed is None
+    assert call.duration_scale == pytest.approx(1.0)
+    assert call.num_candidates == 1
+    assert call.t_schedule_mode == "linear"
+    assert call.sway_coeff == pytest.approx(-1.0)
 
 
 def test_request_mapping_is_deterministic() -> None:

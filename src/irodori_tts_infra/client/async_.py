@@ -67,7 +67,10 @@ class AsyncIrodoriClient:
         response = await self._request("POST", "/synthesize_batch", json=_json_body(request))
         return BatchSynthesisResult.model_validate_json(response.content)
 
-    async def synthesize_stream(self, request: SynthesisRequest) -> AsyncIterator[bytes]:
+    async def synthesize_stream(
+        self,
+        request: SynthesisRequest | BatchSynthesisRequest,
+    ) -> AsyncIterator[bytes]:
         health = await self.health()
         try:
             async with self._client.stream(

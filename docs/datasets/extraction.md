@@ -66,7 +66,8 @@ If you need a smaller training set:
 
 1. lower `--max-bytes`
 2. keep the default deterministic ordering so repeated runs stay reproducible
-3. choose the final RVC training subset from the written clips and `index.json`
+3. choose the final Speaker Inversion reference corpus or listening-test subset
+   from the written clips and `index.json`
 
 ## Troubleshooting
 

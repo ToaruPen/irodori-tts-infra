@@ -16,8 +16,7 @@ MANIFEST
 venv/
 env/
 
-# uv (keep uv.lock for reproducible installs)
-uv.lock
+# uv
 
 # Python tooling caches
 .ruff_cache/
@@ -79,9 +78,9 @@ data/interim/
 data/processed/
 datasets/
 !src/irodori_tts_infra/datasets/
-!src/irodori_tts_infra/datasets/**
+!src/irodori_tts_infra/datasets/**/*.py
 !tests/datasets/
-!tests/datasets/**
+!tests/datasets/**/*.py
 !docs/datasets/
 !docs/datasets/**
 runs/

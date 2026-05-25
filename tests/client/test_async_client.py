@@ -25,6 +25,11 @@ from irodori_tts_infra.contracts import (
     SynthesisResult,
     SynthesisSegment,
 )
+from irodori_tts_infra.engine.backends.fake import FakeSynthesizer, FakeSynthResponse
+from irodori_tts_infra.engine.models import SynthesizedAudio
+from irodori_tts_infra.engine.pipeline import SynthesisPipeline
+from irodori_tts_infra.server.app import create_app
+from irodori_tts_infra.voice_bank import CharacterVoice, SpeakerEmbeddingProfile, VoiceProfile
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -113,7 +118,9 @@ async def test_default_base_url_uses_client_settings() -> None:
 
 @pytest.mark.asyncio
 async def test_synthesize_posts_request_and_returns_result() -> None:
-    synthesis_request = SynthesisRequest(text="こんにちは", caption="女性が話している。")
+    synthesis_request = SynthesisRequest(
+        text="こんにちは", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     synthesis_result = SynthesisResult(
         segment_index=0,
         wav_bytes=b"RIFF-single",
@@ -135,8 +142,16 @@ async def test_synthesize_posts_request_and_returns_result() -> None:
 async def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> None:
     batch_request = BatchSynthesisRequest(
         segments=[
-            SynthesisSegment(segment_index=0, text="地の文です。", caption="女性が読んでいる。"),
-            SynthesisSegment(segment_index=1, text="台詞です。", caption="男性が話している。"),
+            SynthesisSegment(
+                segment_index=0,
+                text="地の文です。",
+                ref_embed="speakers/narrator.speaker.safetensors",
+            ),
+            SynthesisSegment(
+                segment_index=1,
+                text="台詞です。",
+                ref_embed="speakers/narrator.speaker.safetensors",
+            ),
         ]
     )
     batch_result = BatchSynthesisResult(
@@ -160,7 +175,9 @@ async def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> 
 
 @pytest.mark.asyncio
 async def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks() -> None:
-    synthesis_request = SynthesisRequest(text="長い本文です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     payloads = [b"RI", b"FF", b"-wav"]
     paths: list[str] = []
 
@@ -180,8 +197,98 @@ async def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_ch
 
 
 @pytest.mark.asyncio
+async def test_synthesize_stream_posts_single_request_to_asgi_server() -> None:
+    synthesizer = FakeSynthesizer(
+        responses=[
+            FakeSynthResponse(
+                audio=SynthesizedAudio(wav_bytes=b"RIFFstream", sample_rate=24_000),
+            ),
+        ],
+    )
+    app = create_app(
+        SynthesisPipeline(
+            synthesizer,
+            VoiceProfile(
+                narrator=SpeakerEmbeddingProfile(
+                    "speakers/narrator.speaker.safetensors",  # type: ignore[arg-type]
+                ),
+                characters={
+                    "ミカ": CharacterVoice(
+                        name="ミカ",
+                        speaker=SpeakerEmbeddingProfile(
+                            "speakers/mika.speaker.safetensors",  # type: ignore[arg-type]
+                        ),
+                    ),
+                },
+            ),
+        ),
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    async with AsyncIrodoriClient(base_url="http://testserver", transport=transport) as client:
+        chunks = await _collect(
+            client.synthesize_stream(SynthesisRequest(text="本文", speaker="ミカ")),
+        )
+
+    assert b"".join(chunks) == b"RIFFstream"
+    assert len(synthesizer.calls) == 1
+    assert synthesizer.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
+
+
+@pytest.mark.asyncio
+async def test_synthesize_stream_reconstructs_batch_stream_from_asgi_server() -> None:
+    synthesizer = FakeSynthesizer(
+        responses=[
+            FakeSynthResponse(
+                audio=SynthesizedAudio(wav_bytes=b"RIFFzero", sample_rate=24_000),
+            ),
+            FakeSynthResponse(
+                audio=SynthesizedAudio(wav_bytes=b"RIFFone", sample_rate=24_000),
+            ),
+        ],
+    )
+    app = create_app(
+        SynthesisPipeline(
+            synthesizer,
+            VoiceProfile(
+                narrator=SpeakerEmbeddingProfile(
+                    "speakers/narrator.speaker.safetensors",  # type: ignore[arg-type]
+                ),
+                characters={
+                    "ミカ": CharacterVoice(
+                        name="ミカ",
+                        speaker=SpeakerEmbeddingProfile(
+                            "speakers/mika.speaker.safetensors",  # type: ignore[arg-type]
+                        ),
+                    ),
+                },
+            ),
+        ),
+    )
+    app.state.max_chunk_size = 4
+    transport = httpx.ASGITransport(app=app)
+    request = BatchSynthesisRequest(
+        segments=[
+            SynthesisSegment(segment_index=0, text="一つ目"),
+            SynthesisSegment(segment_index=1, text="二つ目", speaker="ミカ"),
+        ],
+    )
+
+    async with AsyncIrodoriClient(base_url="http://testserver", transport=transport) as client:
+        chunks = await _collect(client.synthesize_stream(request))
+
+    assert chunks == [b"RIFF", b"zero", b"RIFF", b"one"]
+    assert [call.ref_embed for call in synthesizer.calls] == [
+        "speakers/narrator.speaker.safetensors",
+        "speakers/mika.speaker.safetensors",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_synthesize_stream_yields_payload_before_response_completes() -> None:
-    synthesis_request = SynthesisRequest(text="長い本文です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     first_frame = (
         StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
         + StreamChunkHeader(segment_index=0, byte_length=2, final=False).to_bytes()
@@ -209,7 +316,9 @@ async def test_synthesize_stream_yields_payload_before_response_completes() -> N
 
 @pytest.mark.asyncio
 async def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> None:
-    synthesis_request = SynthesisRequest(text="境界値です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="境界値です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     payloads = [b"", b"abcd"]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -259,7 +368,9 @@ async def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths(
 )
 @pytest.mark.asyncio
 async def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -286,7 +397,9 @@ async def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: s
 )
 @pytest.mark.asyncio
 async def test_synthesize_stream_rejects_malformed_frames(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(text="壊れたフレームです。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="壊れたフレームです。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -309,7 +422,9 @@ async def test_synthesize_stream_error_responses_map_to_typed_client_errors(
     status_code: int,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
     error_payload = ErrorPayload(
         code="server_busy",
         message="server cannot accept work",
@@ -342,7 +457,9 @@ async def test_synthesize_stream_open_failures_map_to_typed_client_errors(
     message: str,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(text="異常系です。", caption="女性が読んでいる。")
+    synthesis_request = SynthesisRequest(
+        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
