@@ -237,6 +237,11 @@ def test_bootstrap_file_url_percent_encodes_path_component() -> None:
     )
 
 
+def test_bootstrap_file_url_rejects_relative_path() -> None:
+    with pytest.raises(ValueError, match="irodori_tts_dir must be an absolute path"):
+        bootstrap._path_to_file_url("vendor/Irodori-TTS")  # noqa: SLF001
+
+
 def test_bootstrap_resolves_runtime_options_from_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

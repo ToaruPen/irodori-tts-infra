@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import PurePosixPath, PureWindowsPath
 from urllib.parse import quote
 
 from irodori_tts_infra.deploy.remote._common import _run
@@ -100,6 +101,9 @@ def _ps_quote(value: str) -> str:
 
 def _path_to_file_url(path: str) -> str:
     normalized = path.replace("\\", "/")
+    if not (PurePosixPath(normalized).is_absolute() or PureWindowsPath(normalized).is_absolute()):
+        msg = "irodori_tts_dir must be an absolute path"
+        raise ValueError(msg)
     quoted = quote(normalized, safe="/:")
     if normalized.startswith("/"):
         return f"file://{quoted}"

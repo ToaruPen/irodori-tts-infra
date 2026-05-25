@@ -30,4 +30,7 @@ def test_voice_profile_rejects_scalar_aliases() -> None:
 def test_voice_profile_response_does_not_serialize_ref_embed() -> None:
     profile = VoiceProfileResponse(name="Narrator", aliases=("語り手",))
 
-    assert profile.model_dump() == {"name": "Narrator", "aliases": ("語り手",)}
+    assert profile.model_dump(mode="json") == {
+        "name": "Narrator",
+        "aliases": ["語り手"],
+    }
