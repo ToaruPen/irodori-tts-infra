@@ -29,7 +29,10 @@ IRODORI_REMOTE_HOST=user@100.x.y.z
 IRODORI_DEPLOY_DIR=C:\Users\user\irodori-tts-infra
 ```
 
-Use the Tailscale SSH address for `IRODORI_REMOTE_HOST`.
+Use the Tailscale SSH address for `IRODORI_REMOTE_HOST`. See
+[`docs/connection.md`](../connection.md) for the connection model, health
+checks, and the difference between the standard infra server and the legacy
+`say.py` helper server.
 
 On Windows, place the runtime `.env` in the deployed repository root:
 
