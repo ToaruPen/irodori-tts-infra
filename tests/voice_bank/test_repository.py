@@ -264,6 +264,85 @@ ref_embed = '{ref_embed}'
         load_voice_profile(None, speaker_manifest=manifest)
 
 
+def test_load_voice_profile_rejects_non_speaker_safetensors_ref_embed(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"narrator\.ref_embed must end with \.speaker\.safetensors",
+    ):
+        load_voice_profile(None, speaker_manifest=manifest)
+
+
+def test_load_voice_profile_allows_missing_embedding_file_by_default(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    profile = load_voice_profile(None, speaker_manifest=manifest)
+
+    assert profile.narrator == SpeakerEmbeddingProfile(
+        tmp_path / "speakers/narrator.speaker.safetensors",
+    )
+
+
+def test_load_voice_profile_rejects_missing_speaker_embedding_file_when_required(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"speaker embedding file does not exist: .*narrator\.speaker\.safetensors",
+    ):
+        load_voice_profile(None, speaker_manifest=manifest, require_embedding_files=True)
+
+
+def test_load_voice_profile_accepts_existing_speaker_embedding_file_when_required(
+    tmp_path: Path,
+) -> None:
+    speakers_dir = tmp_path / "speakers"
+    speakers_dir.mkdir()
+    (speakers_dir / "narrator.speaker.safetensors").write_bytes(b"placeholder")
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    profile = load_voice_profile(None, speaker_manifest=manifest, require_embedding_files=True)
+
+    assert profile.narrator == SpeakerEmbeddingProfile(
+        tmp_path / "speakers/narrator.speaker.safetensors",
+    )
+
+
 @pytest.mark.parametrize(
     ("manifest_content", "match"),
     [

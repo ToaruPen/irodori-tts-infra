@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import subprocess  # noqa: S404
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,13 +12,14 @@ from typer.testing import CliRunner
 from irodori_tts_infra.config import ServerSettings
 from irodori_tts_infra.deploy import cli
 from irodori_tts_infra.deploy.remote import _common as remote_common  # noqa: PLC2701
-from irodori_tts_infra.deploy.remote import bootstrap, service, sync
+from irodori_tts_infra.deploy.remote import bootstrap, service, sync, voice_bank
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
 pytestmark = pytest.mark.unit
+REMOTE_VALIDATION_FAILURE_CODE = 7
 
 
 def make_project(root: Path) -> None:
@@ -45,7 +47,13 @@ def record_commands(
 
 def remote_command(command: list[str]) -> str:
     assert command[:2] == ["ssh", "gpu"]
-    return command[2]
+    script = command[2]
+    marker = " -EncodedCommand "
+    if marker not in script:
+        return script
+    encoded = script.rsplit(marker, maxsplit=1)[1]
+    decoded = base64.b64decode(encoded).decode("utf-16le")
+    return f"powershell -NoProfile -ExecutionPolicy Bypass -Command {decoded}"
 
 
 def ps_string(value: str) -> str:
@@ -139,6 +147,34 @@ def test_sync_falls_back_to_ssh_mkdir_and_scp_when_rsync_is_unavailable(
     )
 
 
+def test_sync_falls_back_to_scp_when_rsync_command_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    make_project(tmp_path)
+    monkeypatch.setattr(
+        "irodori_tts_infra.deploy.remote.sync.shutil.which",
+        lambda name: "/usr/bin/rsync" if name == "rsync" else None,
+    )
+    commands: list[tuple[list[str], bool]] = []
+
+    def fake_run(command: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        commands.append((list(command), check))
+        if command[0] == "rsync":
+            raise subprocess.CalledProcessError(12, list(command), "", "rsync failed")
+        return subprocess.CompletedProcess(list(command), 0, "", "")
+
+    monkeypatch.setattr(sync, "_run", fake_run)
+
+    sync.sync_project(remote_host="gpu", remote_dir="C:/irodori", repo_root=tmp_path)
+
+    assert commands[0][0][0] == "rsync"
+    assert commands[1][0][:2] == ["ssh", "gpu"]
+    assert "New-Item" in remote_command(commands[1][0])
+    assert commands[2][0][0] == "scp"
+    assert commands[2][0][-1] == "gpu:C:/irodori/"
+
+
 def test_sync_resolves_remote_host_and_dir_from_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -220,8 +256,11 @@ def test_bootstrap_creates_remote_dir_then_runtime_venv(
     bootstrap_script = remote_command(commands[1][0])
     assert "Set-Location -LiteralPath 'C:/irodori'" in bootstrap_script
     assert "uv.lock is required; run deploy-sync first" in bootstrap_script
+    assert "$env:GIT_CONFIG_GLOBAL = $gitConfig" in bootstrap_script
     assert "uv venv '.runtime-venv' --python '3.11' --clear" in bootstrap_script
     assert "uv sync --all-extras --locked --python" in bootstrap_script
+    runtime_python = "$(Join-Path (Get-Location) '.runtime-venv/Scripts/python.exe')"
+    assert f"uv pip install --python {runtime_python} '.[all]'" in bootstrap_script
     assert "Irodori-TTS[cu128] @ file:///C:/Irodori-TTS" in bootstrap_script
     assert "'.[server,irodori]'" not in bootstrap_script
     pip_check = (
@@ -266,6 +305,7 @@ def test_start_service_uses_uvicorn_and_pid_file(
 
     script = remote_command(commands[0][0])
     assert "Join-Path (Get-Location) '.uvicorn.pid'" in script
+    assert "$line = $_.Trim([char]0xFEFF).Trim()" in script
     assert "Start-Process -FilePath $runtimePython" in script
     assert "'-m', 'uvicorn', 'irodori_tts_infra.server.main:app'" in script
     assert "$port = '9001'" in script
@@ -365,6 +405,52 @@ def test_status_service_checks_pid_file_without_raising_for_stopped_service(
     assert "Get-Process -Id $pid" in script
 
 
+def test_verify_voice_bank_loads_remote_env_and_checks_embedding_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = record_commands(monkeypatch, voice_bank)
+
+    voice_bank.verify_voice_bank(remote_host="gpu", remote_dir="C:/irodori")
+
+    script = remote_command(commands[0][0])
+    assert "Set-Location -LiteralPath 'C:/irodori'" in script
+    assert "Join-Path (Get-Location) '.env'" in script
+    assert "$line = $_.Trim([char]0xFEFF).Trim()" in script
+    assert "[Environment]::SetEnvironmentVariable($name, $value, 'Process')" in script
+    assert "Join-Path (Get-Location) '.runtime-venv/Scripts/python.exe'" in script
+    assert "runtime Python is missing; run deploy-bootstrap first" in script
+    assert "speaker_manifest = _resolve_speaker_manifest()" in script
+    assert "characters_md = _resolve_characters_markdown(speaker_manifest)" in script
+    assert (
+        "load_voice_profile(characters_md, speaker_manifest=speaker_manifest, "
+        "require_embedding_files=True)"
+    ) in script
+    assert script.index("[Environment]::SetEnvironmentVariable") < script.index("$runtimePython")
+
+
+def test_deploy_verify_voice_bank_reports_remote_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_verify_voice_bank(**_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(
+            REMOTE_VALIDATION_FAILURE_CODE,
+            ["ssh", "gpu"],
+            output="validation stdout",
+            stderr="missing speaker file",
+        )
+
+    monkeypatch.setattr(cli, "verify_voice_bank", fail_verify_voice_bank)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["deploy-verify-voice-bank", "--remote-host", "gpu", "--remote-dir", "C:/irodori"],
+    )
+
+    assert result.exit_code == REMOTE_VALIDATION_FAILURE_CODE
+    assert "validation stdout" in result.output
+    assert "missing speaker file" in result.output
+
+
 def test_shared_run_reraises_timeout_and_logs_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -408,6 +494,7 @@ def test_shared_run_reraises_timeout_and_logs_command(
         ("deploy-start", "start_service"),
         ("deploy-stop", "stop_service"),
         ("deploy-status", "status_service"),
+        ("deploy-verify-voice-bank", "verify_voice_bank"),
     ],
 )
 def test_deploy_cli_exposes_self_contained_commands(
@@ -423,7 +510,7 @@ def test_deploy_cli_exposes_self_contained_commands(
         assert remote_host is None or isinstance(remote_host, str)
         assert remote_dir is None or isinstance(remote_dir, str)
         calls.append((function_name, remote_host or "", remote_dir or ""))
-        if function_name == "status_service":
+        if function_name in {"status_service", "verify_voice_bank"}:
             return subprocess.CompletedProcess(["status"], 0, "running 123\n", "")
         return None
 

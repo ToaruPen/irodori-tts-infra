@@ -25,9 +25,11 @@ for Phase 1.
 On macOS, keep deployment connection settings in the local `.env` or shell:
 
 ```env
-IRODORI_REMOTE_HOST=user@hostname
+IRODORI_REMOTE_HOST=user@100.x.y.z
 IRODORI_DEPLOY_DIR=C:\Users\user\irodori-tts-infra
 ```
+
+Use the Tailscale SSH address for `IRODORI_REMOTE_HOST`.
 
 On Windows, place the runtime `.env` in the deployed repository root:
 
@@ -38,6 +40,14 @@ C:\Users\user\irodori-tts-infra\.env
 The Windows `.env` should contain server/runtime settings such as
 `IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
 `IRODORI_TTS_PATH_TEMP_WAV_DIR`. Do not commit this file.
+
+For the current trained speaker embeddings, the Windows runtime voice bank can
+point at the Irodori-TTS checkout that owns the speaker files:
+
+```env
+VOICE_BANK_DIR=C:\Users\takut\Dev\Irodori-TTS
+IRODORI_TTS_SERVER_PORT=8923
+```
 
 ## Expected Layout
 
@@ -63,6 +73,7 @@ Run these from the macOS worktree:
 ```bash
 irodori-tts-deploy deploy-sync
 irodori-tts-deploy deploy-bootstrap
+irodori-tts-deploy deploy-verify-voice-bank
 irodori-tts-deploy deploy-start
 irodori-tts-deploy deploy-status
 irodori-tts-deploy deploy-stop
@@ -102,6 +113,12 @@ The PID-file wrapper is intentionally minimal. If the server fails during import
 or startup, inspect the Windows shell environment and run the `.runtime-venv`
 Python command manually for the full error output.
 
+`deploy-verify-voice-bank` runs the deployed runtime Python on the Windows host,
+loads the deployed `.env`, resolves `VOICE_BANK_DIR` or
+`VOICE_BANK_SPEAKER_MANIFEST`, and validates that every manifest entry points to
+an existing `.speaker.safetensors` file. Run it after `deploy-bootstrap` and
+before `deploy-start`.
+
 ## Voice Bank
 
 The deployed voice bank must include `voice_bank_speakers.toml` and the
@@ -114,5 +131,16 @@ ref_embed = "speakers/narrator.speaker.safetensors"
 [characters."チヅル"]
 ref_embed = "speakers/chizuru.speaker.safetensors"
 ```
+
+The actual `.speaker.safetensors` files stay outside Git. For the trained
+OOPPEENN/Kasumi set, copy
+`docs/deploy/voice_bank_speakers.ooppeenn.example.toml` to
+`C:\Users\takut\Dev\Irodori-TTS\voice_bank_speakers.toml` and keep the files
+under `C:\Users\takut\Dev\Irodori-TTS\speakers\`.
+
+The standard FastAPI path accepts `speaker` names and rejects public `ref_embed`
+values. Older local helper scripts under `/Users/sankenbisha/Dev/Test/tts` may
+still pass `ref_embed` directly to their own test server; do not treat that as
+the infra server contract.
 
 RVC training is superseded for the standard path.

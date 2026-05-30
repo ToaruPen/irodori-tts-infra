@@ -17,7 +17,11 @@ def _build_pipeline() -> SynthesisPipeline:
     speaker_manifest = _resolve_speaker_manifest()
     characters_md = _resolve_characters_markdown(speaker_manifest)
 
-    voice_profile = load_voice_profile(characters_md, speaker_manifest=speaker_manifest)
+    voice_profile = load_voice_profile(
+        characters_md,
+        speaker_manifest=speaker_manifest,
+        require_embedding_files=True,
+    )
     backend = create_irodori_backend(IrodoriRuntimeSettings())
     return SynthesisPipeline(backend, voice_profile)
 

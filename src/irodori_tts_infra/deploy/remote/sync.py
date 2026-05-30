@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess  # noqa: S404
 from pathlib import Path
 
-from irodori_tts_infra.deploy.remote._common import _run
+from irodori_tts_infra.deploy.remote._common import _powershell, _ps_quote, _run
 
 DEFAULT_REMOTE_DIR = "C:/irodori-tts-infra"
 RSYNC_EXCLUDES = (
@@ -37,8 +38,14 @@ def sync_project(
     _validate_sync_sources(root)
 
     if shutil.which("rsync") is not None:
-        _run(_rsync_command(host, directory, root))
-        return
+        try:
+            _run(_rsync_command(host, directory, root))
+        except subprocess.CalledProcessError:
+            _run(["ssh", host, _powershell(_mkdir_script(directory))])
+            _run(_scp_command(host, directory, root))
+            return
+        else:
+            return
 
     _run(["ssh", host, _powershell(_mkdir_script(directory))])
     _run(_scp_command(host, directory, root))
@@ -98,11 +105,3 @@ def _remote_dir_with_trailing_slash(remote_dir: str) -> str:
 
 def _mkdir_script(remote_dir: str) -> str:
     return f"New-Item -ItemType Directory -Force -Path {_ps_quote(remote_dir)} | Out-Null"
-
-
-def _powershell(script: str) -> str:
-    return f"powershell -NoProfile -ExecutionPolicy Bypass -Command {script}"
-
-
-def _ps_quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"

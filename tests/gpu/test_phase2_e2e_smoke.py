@@ -144,7 +144,11 @@ def _load_smoke_voice_profile() -> VoiceProfile:
     if not characters_md.is_file():
         pytest.skip(f"VOICE_BANK_DIR is missing characters.md: {characters_md}")
 
-    return load_voice_profile(characters_md=characters_md, speaker_manifest=speaker_manifest)
+    return load_voice_profile(
+        characters_md=characters_md,
+        speaker_manifest=speaker_manifest,
+        require_embedding_files=True,
+    )
 
 
 def _smoke_character_name(voice_profile: VoiceProfile) -> str:

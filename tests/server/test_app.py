@@ -16,6 +16,7 @@ from irodori_tts_infra.server.app import create_app, create_app_from_factory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 
@@ -157,6 +158,32 @@ def test_server_main_startup_fails_without_voice_bank_env(
 
     with (
         pytest.raises(ValueError, match="VOICE_BANK_SPEAKER_MANIFEST or VOICE_BANK_DIR"),
+        TestClient(server_main.app),
+    ):
+        pass
+
+
+def test_server_main_startup_fails_when_voice_bank_embedding_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VOICE_BANK_SPEAKER_MANIFEST", str(manifest))
+    monkeypatch.delenv("VOICE_BANK_DIR", raising=False)
+    server_main = importlib.import_module("irodori_tts_infra.server.main")
+
+    with (
+        pytest.raises(
+            ValueError,
+            match=r"speaker embedding file does not exist: .*narrator\.speaker\.safetensors",
+        ),
         TestClient(server_main.app),
     ):
         pass

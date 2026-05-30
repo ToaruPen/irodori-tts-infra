@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated
+from subprocess import CalledProcessError  # noqa: S404
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -11,6 +12,7 @@ from irodori_tts_infra.deploy.remote.service import (
     stop_service,
 )
 from irodori_tts_infra.deploy.remote.sync import sync_project
+from irodori_tts_infra.deploy.remote.voice_bank import verify_voice_bank
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -48,6 +50,8 @@ def deploy_sync(
             sync_project(remote_host=remote_host, remote_dir=remote_dir)
         else:
             sync_project(remote_host=remote_host, remote_dir=remote_dir, repo_root=repo_root)
+    except CalledProcessError as exc:
+        _raise_remote_process_error(exc)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("deploy sync complete")
@@ -94,6 +98,8 @@ def deploy_bootstrap(
             python_version=python_version,
             torch_backend_extra=torch_backend_extra,
         )
+    except CalledProcessError as exc:
+        _raise_remote_process_error(exc)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("deploy bootstrap complete")
@@ -123,6 +129,8 @@ def deploy_start(
                 server_host=server_host,
                 port=port,
             )
+    except CalledProcessError as exc:
+        _raise_remote_process_error(exc)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("deploy start complete")
@@ -136,6 +144,8 @@ def deploy_stop(
 ) -> None:
     try:
         stop_service(remote_host=remote_host, remote_dir=remote_dir)
+    except CalledProcessError as exc:
+        _raise_remote_process_error(exc)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("deploy stop complete")
@@ -154,3 +164,28 @@ def deploy_status(
     if result.stdout:
         typer.echo(result.stdout.strip())
     raise typer.Exit(result.returncode)
+
+
+@app.command("deploy-verify-voice-bank")
+def deploy_verify_voice_bank(
+    *,
+    remote_host: RemoteHostOption = None,
+    remote_dir: RemoteDirOption = None,
+) -> None:
+    try:
+        result = verify_voice_bank(remote_host=remote_host, remote_dir=remote_dir)
+    except CalledProcessError as exc:
+        _raise_remote_process_error(exc)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if result.stdout:
+        typer.echo(result.stdout.strip())
+    typer.echo("voice bank verified")
+
+
+def _raise_remote_process_error(exc: CalledProcessError) -> NoReturn:
+    if exc.stdout:
+        typer.echo(str(exc.stdout).strip(), err=True)
+    if exc.stderr:
+        typer.echo(str(exc.stderr).strip(), err=True)
+    raise typer.Exit(exc.returncode) from exc
