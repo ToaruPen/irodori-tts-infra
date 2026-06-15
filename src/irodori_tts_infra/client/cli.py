@@ -15,7 +15,15 @@ from irodori_tts_infra.client.errors import ClientError
 from irodori_tts_infra.client.sync import SyncIrodoriClient
 from irodori_tts_infra.config import ClientSettings
 from irodori_tts_infra.contracts import SynthesisRequest
-from irodori_tts_infra.text import Segment, SegmentKind, parse_turn_markdown
+from irodori_tts_infra.text import (
+    DEFAULT_TTS_MAX_CHARS,
+    DEFAULT_TTS_MAX_SEGMENTS,
+    DEFAULT_TURN_TEXT_MAX_CHARS,
+    Segment,
+    SegmentKind,
+    parse_turn_markdown,
+    prepare_tts_segments,
+)
 from irodori_tts_infra.voice_bank import (
     find_characters_markdown,
     find_speaker_manifest,
@@ -116,7 +124,16 @@ def read_aloud(
         ),
     ] = "afplay",
 ) -> None:
-    segments = parse_turn_markdown(turn_file.read_text(encoding="utf-8"))
+    try:
+        segments = prepare_tts_segments(
+            parse_turn_markdown(turn_file.read_text(encoding="utf-8")),
+            max_chars=DEFAULT_TTS_MAX_CHARS,
+            max_segments=DEFAULT_TTS_MAX_SEGMENTS,
+            max_total_chars=DEFAULT_TURN_TEXT_MAX_CHARS,
+        )
+    except ValueError as exc:
+        message = f"invalid turn file for read-aloud synthesis: {exc}"
+        raise typer.BadParameter(message) from exc
     if not segments:
         message = "turn file contains no readable segments"
         raise typer.BadParameter(message)

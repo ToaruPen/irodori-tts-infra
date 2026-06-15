@@ -19,7 +19,7 @@ def verify_voice_bank(
 ) -> subprocess.CompletedProcess[str]:
     host = resolve_remote_host(remote_host)
     directory = resolve_remote_dir(remote_dir)
-    return _run(["ssh", host, _powershell(_verify_script(directory))])
+    return _run(["ssh", host, _powershell(_verify_script(directory))], check=True)
 
 
 def _verify_script(remote_dir: str) -> str:

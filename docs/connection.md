@@ -39,14 +39,15 @@ ssh user@100.x.y.z "hostname"
 Check the standard infra FastAPI server:
 
 ```bash
-curl "http://100.x.y.z:8923/health"
+curl "http://100.x.y.z:${IRODORI_TTS_SERVER_PORT}/health"
 ```
 
 If the health check times out, first verify SSH access. Then check whether the
-Windows process is listening on `8923`.
+Windows process is listening on `IRODORI_TTS_SERVER_PORT`. Ensure the variable
+is defined before running the check.
 
 ```powershell
-netstat -ano | findstr :8923
+netstat -ano | findstr ":$env:IRODORI_TTS_SERVER_PORT"
 ```
 
 ## Standard Infra Server

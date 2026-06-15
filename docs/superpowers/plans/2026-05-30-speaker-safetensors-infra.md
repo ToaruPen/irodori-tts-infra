@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Strict Voice-Bank Asset Validation
+## Task 1: Strict Voice-Bank Asset Validation
 
 **Files:**
 - Modify: `src/irodori_tts_infra/voice_bank/repository.py`
@@ -39,7 +39,7 @@ Run:
 uv run pytest --no-cov tests/voice_bank/test_repository.py tests/server/test_app.py -q
 ```
 
-### Task 2: Remote Voice-Bank Verification Command
+## Task 2: Remote Voice-Bank Verification Command
 
 **Files:**
 - Create: `src/irodori_tts_infra/deploy/remote/voice_bank.py`
@@ -63,7 +63,7 @@ Run:
 uv run pytest --no-cov tests/deploy/test_remote.py -q
 ```
 
-### Task 3: Operator Documentation and Examples
+## Task 3: Operator Documentation and Examples
 
 **Files:**
 - Create: `docs/deploy/voice_bank_speakers.ooppeenn.example.toml`
@@ -87,7 +87,7 @@ uv run ruff format --check .
 uv run ruff check .
 ```
 
-### Task 4: Final Verification
+## Task 4: Final Verification
 
 **Files:**
 - All modified source, tests, and docs.

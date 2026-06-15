@@ -428,6 +428,29 @@ def test_verify_voice_bank_loads_remote_env_and_checks_embedding_files(
     assert script.index("[Environment]::SetEnvironmentVariable") < script.index("$runtimePython")
 
 
+def test_verify_voice_bank_propagates_subprocess_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_run(
+        command: list[str],
+        *,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        assert command[0] == "ssh"
+        assert check is True
+        raise subprocess.CalledProcessError(
+            REMOTE_VALIDATION_FAILURE_CODE,
+            command,
+            output="validation stdout",
+            stderr="missing speaker file",
+        )
+
+    monkeypatch.setattr(voice_bank, "_run", fail_run)
+
+    with pytest.raises(subprocess.CalledProcessError, match="ssh"):
+        voice_bank.verify_voice_bank(remote_host="gpu", remote_dir="C:/irodori")
+
+
 def test_deploy_verify_voice_bank_reports_remote_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

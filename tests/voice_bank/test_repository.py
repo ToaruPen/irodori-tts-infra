@@ -343,6 +343,63 @@ ref_embed = "speakers/narrator.speaker.safetensors"
     )
 
 
+def test_load_voice_profile_rejects_missing_character_embedding_file_when_required(
+    tmp_path: Path,
+) -> None:
+    speakers_dir = tmp_path / "speakers"
+    speakers_dir.mkdir()
+    (speakers_dir / "narrator.speaker.safetensors").write_bytes(b"placeholder")
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."チヅル"]
+ref_embed = "speakers/chizuru.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"speaker embedding file does not exist: .*chizuru\.speaker\.safetensors",
+    ):
+        load_voice_profile(characters_md, speaker_manifest=manifest, require_embedding_files=True)
+
+
+def test_load_voice_profile_accepts_existing_character_embedding_file_when_required(
+    tmp_path: Path,
+) -> None:
+    speakers_dir = tmp_path / "speakers"
+    speakers_dir.mkdir()
+    (speakers_dir / "narrator.speaker.safetensors").write_bytes(b"placeholder")
+    (speakers_dir / "chizuru.speaker.safetensors").write_bytes(b"placeholder")
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."チヅル"]
+ref_embed = "speakers/chizuru.speaker.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    profile = load_voice_profile(
+        characters_md, speaker_manifest=manifest, require_embedding_files=True
+    )
+
+    assert profile.characters["チヅル"].speaker == SpeakerEmbeddingProfile(
+        tmp_path / "speakers/chizuru.speaker.safetensors",
+    )
+
+
 @pytest.mark.parametrize(
     ("manifest_content", "match"),
     [

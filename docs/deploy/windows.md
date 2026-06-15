@@ -109,7 +109,7 @@ irodori-tts-deploy deploy-bootstrap \
 environment, then launches:
 
 ```powershell
-.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port 8923
+.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port $env:IRODORI_TTS_SERVER_PORT
 ```
 
 The PID-file wrapper is intentionally minimal. If the server fails during import
