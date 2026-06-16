@@ -77,6 +77,7 @@ Tests must not depend on model weights, generated audio, or remote machines unle
 - GPU server: Windows, RTX 4070 12GB, Tailscale VPN
 - Client: macOS (Apple Silicon)
 - Host/path configuration: see `.env` (not committed; copy from `.env.example`)
+- Connection model and troubleshooting: see `docs/connection.md`
 
 ## Repository Hygiene
 

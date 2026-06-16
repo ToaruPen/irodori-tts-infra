@@ -144,6 +144,129 @@ def test_read_aloud_synthesizes_and_plays_segments_in_speaker_order(
     assert client.requests[1].ref_embed is None
 
 
+def test_read_aloud_splits_long_segments_before_synthesis(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text(
+        "朝の教室には柔らかい光が差し込み、窓際の机だけが少し暖かかった。",
+        encoding="utf-8",
+    )
+    write_speaker_manifest(tmp_path)
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {
+        "朝の教室には柔らかい光が差し込み、": [b"first"],
+        "窓際の机だけが少し暖かかった。": [b"second"],
+    }
+    played_audio: list[bytes] = []
+
+    def fake_run(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+        assert check is True
+        played_audio.append(Path(command[-1]).read_bytes())
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "DEFAULT_TTS_MAX_CHARS", 24)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code == 0, result.output
+    client = FakeSyncIrodoriClient.instances[0]
+    assert [request.text for request in client.requests] == [
+        "朝の教室には柔らかい光が差し込み、",
+        "窓際の机だけが少し暖かかった。",
+    ]
+    assert played_audio == [b"first", b"second"]
+
+
+def test_read_aloud_preserves_speaker_when_splitting_dialogue(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text(
+        "【チヅル】「近くに来て。もう少しだけ、静かに話して。」",
+        encoding="utf-8",
+    )
+    (tmp_path / "characters.md").write_text(
+        """
+## チヅル
+- **性格**: クール
+
+## ミカ
+- **性格**: 明るい
+""",
+        encoding="utf-8",
+    )
+    write_speaker_manifest(tmp_path)
+    FakeSyncIrodoriClient.instances = []
+    FakeSyncIrodoriClient.events = []
+    FakeSyncIrodoriClient.wav_chunks_by_text = {
+        "近くに来て。": [b"first"],
+        "もう少しだけ、": [b"second"],
+        "静かに話して。": [b"third"],
+    }
+    played_audio: list[bytes] = []
+
+    def fake_run(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+        assert check is True
+        played_audio.append(Path(command[-1]).read_bytes())
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli, "SyncIrodoriClient", FakeSyncIrodoriClient)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "DEFAULT_TTS_MAX_CHARS", 12)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code == 0, result.output
+    client = FakeSyncIrodoriClient.instances[0]
+    assert [request.text for request in client.requests] == [
+        "近くに来て。",
+        "もう少しだけ、",
+        "静かに話して。",
+    ]
+    assert [request.speaker for request in client.requests] == ["チヅル", "チヅル", "チヅル"]
+    assert played_audio == [b"first", b"second", b"third"]
+
+
+def test_read_aloud_reports_too_many_prepared_segments(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("一。二。三。", encoding="utf-8")
+    write_narrator_only_speaker_manifest(tmp_path)
+
+    monkeypatch.setattr(cli, "DEFAULT_TTS_MAX_SEGMENTS", 2)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code != 0
+    assert "too many TTS" in result.output
+    assert "segments" in result.output
+
+
+def test_read_aloud_reports_excessive_total_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("あ" * 11, encoding="utf-8")
+    write_narrator_only_speaker_manifest(tmp_path)
+
+    monkeypatch.setattr(cli, "DEFAULT_TURN_TEXT_MAX_CHARS", 10)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code != 0
+    assert "invalid turn file for read-aloud synthesis" in result.output
+    assert "large for read-aloud synthesis" in result.output
+
+
 def test_read_aloud_removes_temp_wav_after_playback_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -411,7 +534,10 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
     (save_dir / "notes.txt").write_text("keep me", encoding="utf-8")
     FakeSyncIrodoriClient.instances = []
     FakeSyncIrodoriClient.events = []
-    FakeSyncIrodoriClient.wav_chunks_by_text = {"一。二。": [b"combined-wav"]}
+    FakeSyncIrodoriClient.wav_chunks_by_text = {
+        "一。": [b"first-wav"],
+        "二。": [b"second-wav"],
+    }
     playback_calls: list[list[str]] = []
 
     def fake_run(command: list[str], *, check: bool) -> None:
@@ -428,8 +554,8 @@ def test_read_aloud_save_dir_clears_stale_wav_files_and_skips_playback(
 
     assert result.exit_code == 0, result.output
     assert playback_calls == []
-    assert (save_dir / "segment-0000.wav").read_bytes() == b"combined-wav"
-    assert not (save_dir / "segment-0001.wav").exists()
+    assert (save_dir / "segment-0000.wav").read_bytes() == b"first-wav"
+    assert (save_dir / "segment-0001.wav").read_bytes() == b"second-wav"
     assert not (save_dir / "segment-10000.wav").exists()
     assert (save_dir / "0000.wav").read_bytes() == b"user-numeric-wav"
     assert (save_dir / "personal.wav").read_bytes() == b"user-wav"

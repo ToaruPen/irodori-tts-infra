@@ -3,8 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from irodori_tts_infra.config import ServerSettings
-from irodori_tts_infra.deploy.remote._common import _run
-from irodori_tts_infra.deploy.remote.bootstrap import _powershell, _ps_quote
+from irodori_tts_infra.deploy.remote._common import (
+    _load_env_script,
+    _powershell,
+    _ps_quote,
+    _run,
+)
 from irodori_tts_infra.deploy.remote.sync import (
     resolve_remote_dir,
     resolve_remote_host,
@@ -74,22 +78,6 @@ def _start_script(remote_dir: str, *, server_host: str | None, port: int | None)
         ") -PassThru -WindowStyle Hidden; "
         "Set-Content -LiteralPath $pidFile -Value $process.Id; "
         "Write-Output $process.Id"
-    )
-
-
-def _load_env_script() -> str:
-    return (
-        "$envFile = Join-Path (Get-Location) '.env'; "
-        "if (Test-Path -LiteralPath $envFile) { "
-        "Get-Content -LiteralPath $envFile | ForEach-Object { "
-        "$line = $_.Trim(); "
-        "if ($line -and !$line.StartsWith('#')) { "
-        "$separator = $line.IndexOf('='); "
-        "if ($separator -gt 0) { "
-        "$name = $line.Substring(0, $separator).Trim(); "
-        "$value = $line.Substring($separator + 1).Trim().Trim('\"').Trim(\"'\"); "
-        "if ($name) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } "
-        "} } } }; "
     )
 
 

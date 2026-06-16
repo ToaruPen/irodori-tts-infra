@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 SPEAKER_MANIFEST_FILENAME = "voice_bank_speakers.toml"
+SPEAKER_EMBEDDING_SUFFIX = ".speaker.safetensors"
 
 
 def find_characters_markdown(turn_file: Path) -> Path | None:
@@ -41,6 +42,7 @@ def load_voice_profile(
     characters_md: Path | None,
     *,
     speaker_manifest: Path | None = None,
+    require_embedding_files: bool = False,
 ) -> VoiceProfile:
     if speaker_manifest is None:
         msg = "speaker manifest is required"
@@ -61,7 +63,10 @@ def load_voice_profile(
             resolved_characters_md.read_text(encoding="utf-8"),
         )
 
-    narrator, characters = _load_speaker_manifest(speaker_manifest)
+    narrator, characters = _load_speaker_manifest(
+        speaker_manifest,
+        require_embedding_files=require_embedding_files,
+    )
     unknown_names = sorted(set(characters) - known_names) if resolved_characters_md else []
     if unknown_names:
         msg = (
@@ -87,6 +92,8 @@ def _find_upwards(turn_file: Path, filename: str) -> Path | None:
 
 def _load_speaker_manifest(
     manifest: Path,
+    *,
+    require_embedding_files: bool,
 ) -> tuple[SpeakerEmbeddingProfile, dict[str, CharacterVoice]]:
     data = tomllib.loads(manifest.read_text(encoding="utf-8"))
     if "narrator" not in data:
@@ -101,6 +108,7 @@ def _load_speaker_manifest(
         narrator_table,
         context="narrator",
         base_dir=manifest.parent,
+        require_embedding_files=require_embedding_files,
     )
     character_tables = _as_table(data.get("characters", {}), "characters")
     characters: dict[str, CharacterVoice] = {}
@@ -109,6 +117,7 @@ def _load_speaker_manifest(
             _as_table(value, f"characters.{name}"),
             context=f"characters.{name}",
             base_dir=manifest.parent,
+            require_embedding_files=require_embedding_files,
         )
         characters[name] = CharacterVoice(name=name, speaker=speaker)
     return narrator, characters
@@ -119,9 +128,16 @@ def _parse_speaker_profile(
     *,
     context: str,
     base_dir: Path,
+    require_embedding_files: bool,
 ) -> SpeakerEmbeddingProfile:
     return SpeakerEmbeddingProfile(
-        ref_embed=_required_path(table, "ref_embed", context, base_dir=base_dir),
+        ref_embed=_required_path(
+            table,
+            "ref_embed",
+            context,
+            base_dir=base_dir,
+            require_embedding_files=require_embedding_files,
+        ),
     )
 
 
@@ -131,11 +147,18 @@ def _required_path(
     context: str,
     *,
     base_dir: Path,
+    require_embedding_files: bool,
 ) -> Path:
-    return _resolve_manifest_path(
-        _string_value(table.get(key), f"{context}.{key}"),
-        base_dir=base_dir,
-    )
+    value_context = f"{context}.{key}"
+    value = _string_value(table.get(key), value_context)
+    if not value.endswith(SPEAKER_EMBEDDING_SUFFIX):
+        msg = f"{value_context} must end with {SPEAKER_EMBEDDING_SUFFIX}"
+        raise ValueError(msg)
+    path = _resolve_manifest_path(value, base_dir=base_dir)
+    if require_embedding_files and not path.is_file():
+        msg = f"speaker embedding file does not exist: {path}"
+        raise ValueError(msg)
+    return path
 
 
 def _string_value(value: object, context: str) -> str:

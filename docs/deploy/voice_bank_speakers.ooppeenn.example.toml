@@ -1,0 +1,40 @@
+# Example manifest for the Windows voice bank.
+# Copy this to VOICE_BANK_DIR/voice_bank_speakers.toml and keep the referenced
+# .speaker.safetensors files under VOICE_BANK_DIR/speakers/.
+# The .speaker.safetensors files themselves must not be committed.
+
+[narrator]
+ref_embed = "speakers/kasumi.speaker.safetensors"
+
+[characters."カスミ"]
+ref_embed = "speakers/kasumi.speaker.safetensors"
+
+[characters."ミオ"]
+ref_embed = "speakers/oop176_natsu_no_owari_sp_dcec9a11d3.speaker.safetensors"
+
+[characters."絢音"]
+ref_embed = "speakers/oop73_toshishita_kanojo_sp_6b50dbf844.speaker.safetensors"
+
+[characters."エレナ"]
+ref_embed = "speakers/oop68_maid_san_no_iru_kurashi_s_sp_e4da3225a4.speaker.safetensors"
+
+[characters."綾乃"]
+ref_embed = "speakers/oop54_aikagi_2_sp_85dded42a7.speaker.safetensors"
+
+[characters."綾希"]
+ref_embed = "speakers/oop53_aibeya_sp_f7269f5ffc.speaker.safetensors"
+
+[characters."舞雪"]
+ref_embed = "speakers/oop70_osananajimi_no_iru_kurashi_sp_7195504dbb.speaker.safetensors"
+
+[characters."朔"]
+ref_embed = "speakers/oop52_aibeya_2_sp_5d544fe890.speaker.safetensors"
+
+[characters."アイ"]
+ref_embed = "speakers/oop55_aikagi_3_sp_683c9895cc.speaker.safetensors"
+
+[characters."イヴ"]
+ref_embed = "speakers/oop69_maid_san_no_iru_kurashi_sp_07497b0fbd.speaker.safetensors"
+
+[characters."アナベル"]
+ref_embed = "speakers/oop77_anabel_maidgarden_sp_451488a7c1.speaker.safetensors"

@@ -241,6 +241,7 @@ ignore_names = [
   "deploy_status",
   "deploy_stop",
   "deploy_sync",
+  "deploy_verify_voice_bank",
   "exc",
   "exc_type",
   "get_health",

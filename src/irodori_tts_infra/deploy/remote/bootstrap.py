@@ -4,7 +4,7 @@ import os
 from pathlib import PurePosixPath, PureWindowsPath
 from urllib.parse import quote
 
-from irodori_tts_infra.deploy.remote._common import _run
+from irodori_tts_infra.deploy.remote._common import _powershell, _ps_quote, _run
 from irodori_tts_infra.deploy.remote.sync import (
     resolve_remote_dir,
     resolve_remote_host,
@@ -80,8 +80,13 @@ def _bootstrap_script(
         "$lockFile = Join-Path (Get-Location) 'uv.lock'; "
         "if (!(Test-Path -LiteralPath $lockFile)) { "
         "throw 'uv.lock is required; run deploy-sync first' }; "
+        "$gitConfig = Join-Path (Get-Location) '.gitconfig-empty'; "
+        "if (!(Test-Path -LiteralPath $gitConfig)) { "
+        "Set-Content -LiteralPath $gitConfig -Value '' -Encoding UTF8 }; "
+        "$env:GIT_CONFIG_GLOBAL = $gitConfig; "
         f"uv venv '.runtime-venv' --python {_ps_quote(python_version)} --clear; "
         f"uv sync --all-extras --locked --python {runtime_python}; "
+        f"uv pip install --python {runtime_python} '.[all]'; "
         f"uv pip install --python {runtime_python} {_ps_quote(irodori_requirement)}; "
         f"uv pip check --python {runtime_python}"
     )
@@ -89,14 +94,6 @@ def _bootstrap_script(
 
 def _mkdir_script(remote_dir: str) -> str:
     return f"New-Item -ItemType Directory -Force -Path {_ps_quote(remote_dir)} | Out-Null"
-
-
-def _powershell(script: str) -> str:
-    return f"powershell -NoProfile -ExecutionPolicy Bypass -Command {script}"
-
-
-def _ps_quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 def _path_to_file_url(path: str) -> str:
