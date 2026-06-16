@@ -400,6 +400,30 @@ ref_embed = "speakers/chizuru.speaker.safetensors"
     )
 
 
+def test_load_voice_profile_rejects_non_speaker_safetensors_character_ref_embed(
+    tmp_path: Path,
+) -> None:
+    characters_md = tmp_path / "characters.md"
+    characters_md.write_text("## チヅル\n- **性格**: クール\n", encoding="utf-8")
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+
+[characters."チヅル"]
+ref_embed = "speakers/chizuru.safetensors"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"characters\.チヅル\.ref_embed must end with \.speaker\.safetensors",
+    ):
+        load_voice_profile(characters_md, speaker_manifest=manifest)
+
+
 @pytest.mark.parametrize(
     ("manifest_content", "match"),
     [

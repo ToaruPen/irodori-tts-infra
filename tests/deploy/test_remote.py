@@ -147,7 +147,7 @@ def test_sync_falls_back_to_ssh_mkdir_and_scp_when_rsync_is_unavailable(
     )
 
 
-def test_sync_falls_back_to_scp_when_rsync_command_fails(
+def test_sync_falls_back_to_scp_when_remote_rsync_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -161,7 +161,12 @@ def test_sync_falls_back_to_scp_when_rsync_command_fails(
     def fake_run(command: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
         commands.append((list(command), check))
         if command[0] == "rsync":
-            raise subprocess.CalledProcessError(12, list(command), "", "rsync failed")
+            raise subprocess.CalledProcessError(
+                12,
+                list(command),
+                "",
+                "bash: rsync: command not found",
+            )
         return subprocess.CompletedProcess(list(command), 0, "", "")
 
     monkeypatch.setattr(sync, "_run", fake_run)
@@ -173,6 +178,36 @@ def test_sync_falls_back_to_scp_when_rsync_command_fails(
     assert "New-Item" in remote_command(commands[1][0])
     assert commands[2][0][0] == "scp"
     assert commands[2][0][-1] == "gpu:C:/irodori/"
+
+
+def test_sync_reraises_non_unavailable_rsync_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    make_project(tmp_path)
+    monkeypatch.setattr(
+        "irodori_tts_infra.deploy.remote.sync.shutil.which",
+        lambda name: "/usr/bin/rsync" if name == "rsync" else None,
+    )
+    commands: list[tuple[list[str], bool]] = []
+
+    def fake_run(command: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        commands.append((list(command), check))
+        if command[0] == "rsync":
+            raise subprocess.CalledProcessError(
+                255,
+                list(command),
+                "",
+                "Permission denied (publickey).",
+            )
+        return subprocess.CompletedProcess(list(command), 0, "", "")
+
+    monkeypatch.setattr(sync, "_run", fake_run)
+
+    with pytest.raises(subprocess.CalledProcessError, match="rsync"):
+        sync.sync_project(remote_host="gpu", remote_dir="C:/irodori", repo_root=tmp_path)
+
+    assert [command[0][0] for command in commands] == ["rsync"]
 
 
 def test_sync_resolves_remote_host_and_dir_from_environment(

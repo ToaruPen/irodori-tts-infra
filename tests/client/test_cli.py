@@ -250,6 +250,23 @@ def test_read_aloud_reports_too_many_prepared_segments(
     assert "segments" in result.output
 
 
+def test_read_aloud_reports_excessive_total_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    turn_file = tmp_path / "turn.md"
+    turn_file.write_text("あ" * 11, encoding="utf-8")
+    write_narrator_only_speaker_manifest(tmp_path)
+
+    monkeypatch.setattr(cli, "DEFAULT_TURN_TEXT_MAX_CHARS", 10)
+
+    result = CliRunner().invoke(cli.app, ["read-aloud", str(turn_file)])
+
+    assert result.exit_code != 0
+    assert "invalid turn file for read-aloud synthesis" in result.output
+    assert "large for read-aloud synthesis" in result.output
+
+
 def test_read_aloud_removes_temp_wav_after_playback_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -40,7 +40,9 @@ def sync_project(
     if shutil.which("rsync") is not None:
         try:
             _run(_rsync_command(host, directory, root))
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            if not _is_rsync_unavailable_error(exc):
+                raise
             _run(["ssh", host, _powershell(_mkdir_script(directory))])
             _run(_scp_command(host, directory, root))
             return
@@ -95,6 +97,29 @@ def _validate_sync_sources(repo_root: Path) -> None:
     if missing:
         msg = f"repo root is missing deploy source item(s): {', '.join(missing)}"
         raise ValueError(msg)
+
+
+def _is_rsync_unavailable_error(exc: subprocess.CalledProcessError) -> bool:
+    output = _error_text(exc.output) + "\n" + _error_text(exc.stderr)
+    normalized = output.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "rsync: command not found",
+            "rsync: not found",
+            "rsync: command not recognized",
+            "rsync is not recognized as an internal or external command",
+            "rsync : the term 'rsync' is not recognized",
+        )
+    )
+
+
+def _error_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _remote_dir_with_trailing_slash(remote_dir: str) -> str:
