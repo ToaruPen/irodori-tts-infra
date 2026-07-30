@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
+    FiniteFloat,
     field_serializer,
     field_validator,
     model_validator,
@@ -24,6 +25,19 @@ class _ContractModel(BaseModel):
 
 
 MAX_NUM_CANDIDATES = 4
+IrodoriStyle = Literal["neutral", "calm", "cheerful", "clear"]
+PositiveFiniteFloat = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+
+_STYLE_CAPTIONS: dict[IrodoriStyle, str | None] = {
+    "neutral": None,
+    "calm": "穏やかで優しい女性の声で、自然に話す。",
+    "cheerful": "明るく親しみやすい女性の声で、自然に話す。",
+    "clear": "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。",
+}
+
+
+def style_caption(style: IrodoriStyle) -> str | None:
+    return _STYLE_CAPTIONS[style]
 
 
 class SynthesisRequest(_ContractModel):
@@ -31,13 +45,15 @@ class SynthesisRequest(_ContractModel):
     speaker: str | None = Field(default=None, min_length=1)
     ref_embed: str | None = Field(default=None, min_length=1)
     num_steps: int = Field(default=40, gt=0)
-    cfg_scale_text: float = Field(default=3.0, gt=0.0)
-    cfg_scale_speaker: float = Field(default=5.0, gt=0.0)
+    cfg_scale_text: PositiveFiniteFloat = 3.0
+    cfg_scale_caption: PositiveFiniteFloat = 3.0
+    cfg_scale_speaker: PositiveFiniteFloat = 5.0
+    style: IrodoriStyle = "neutral"
     seed: int | None = None
-    duration_scale: float = Field(default=1.0, gt=0.0)
+    duration_scale: PositiveFiniteFloat = 1.0
     num_candidates: int = Field(default=1, gt=0, le=MAX_NUM_CANDIDATES)
     t_schedule_mode: Literal["linear", "sway"] = "linear"
-    sway_coeff: float = -1.0
+    sway_coeff: FiniteFloat = -1.0
 
     @field_validator("text")
     @classmethod

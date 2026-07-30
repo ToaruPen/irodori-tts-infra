@@ -163,11 +163,10 @@ def test_batch_and_stream_reject_public_ref_embed(
     ("field", "value"),
     [
         ("caption", "old VoiceDesign caption"),
-        ("cfg_scale_caption", 3.0),
         ("no_ref", False),
     ],
 )
-def test_synthesize_rejects_removed_voicedesign_fields(
+def test_synthesize_rejects_private_voicedesign_fields(
     pipeline_factory: Callable[..., SynthesisPipeline],
     field: str,
     value: object,
@@ -182,6 +181,27 @@ def test_synthesize_rejects_removed_voicedesign_fields(
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
+
+
+def test_synthesize_accepts_style_and_caption_cfg(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    synthesizer = FakeSynthesizer()
+    app = create_app(pipeline_factory(synthesizer))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={
+                "text": "本文",
+                "style": "calm",
+                "cfg_scale_caption": 2.5,
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert synthesizer.calls[0].style == "calm"
+    assert synthesizer.calls[0].cfg_scale_caption == pytest.approx(2.5)
 
 
 def test_synthesize_returns_200_for_empty_wav_bytes(
@@ -494,11 +514,10 @@ def test_synthesize_batch_validation_error_returns_422(
     ("field", "value"),
     [
         ("caption", "old VoiceDesign caption"),
-        ("cfg_scale_caption", 3.0),
         ("no_ref", False),
     ],
 )
-def test_synthesize_batch_rejects_removed_voicedesign_fields(
+def test_synthesize_batch_rejects_private_voicedesign_fields(
     pipeline_factory: Callable[..., SynthesisPipeline],
     field: str,
     value: object,
@@ -652,11 +671,10 @@ def test_synthesize_stream_accepts_single_request(
     ("field", "value"),
     [
         ("caption", "old VoiceDesign caption"),
-        ("cfg_scale_caption", 3.0),
         ("no_ref", False),
     ],
 )
-def test_synthesize_stream_rejects_removed_voicedesign_fields(
+def test_synthesize_stream_rejects_private_voicedesign_fields(
     pipeline_factory: Callable[..., SynthesisPipeline],
     field: str,
     value: object,

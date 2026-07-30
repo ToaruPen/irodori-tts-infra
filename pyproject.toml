@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "irodori-tts-infra"
 version = "0.1.0"
-description = "Irodori-TTS v3 base infrastructure for character-consistent Japanese novel TTS."
+description = "Irodori-TTS v3 VoiceDesign infrastructure with Speaker Inversion."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

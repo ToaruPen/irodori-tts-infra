@@ -1,8 +1,8 @@
 # Connection
 
-This project reaches the Windows GPU host through Tailscale. Do not rely on LAN
-addresses, public port forwarding, or non-Tailscale hostnames for normal agent
-work.
+This project reaches the Windows GPU host through an SSH tunnel over Tailscale.
+The HTTP server binds only to Windows loopback; do not expose it through LAN
+addresses or public port forwarding.
 
 ## Hosts
 
@@ -39,12 +39,22 @@ ssh user@100.x.y.z "hostname"
 Check the standard infra FastAPI server:
 
 ```bash
-curl "http://100.x.y.z:${IRODORI_TTS_SERVER_PORT}/health"
+ssh -N \
+  -L "${IRODORI_TTS_SERVER_PORT}:127.0.0.1:${IRODORI_TTS_SERVER_PORT}" \
+  "$IRODORI_REMOTE_HOST"
+```
+
+Keep that command running, then check the forwarded endpoint from another
+terminal:
+
+```bash
+curl "http://127.0.0.1:${IRODORI_TTS_SERVER_PORT}/health"
 ```
 
 If the health check times out, first verify SSH access. Then check whether the
-Windows process is listening on `IRODORI_TTS_SERVER_PORT`. Ensure the variable
-is defined before running the check.
+Windows process is listening on loopback at `IRODORI_TTS_SERVER_PORT` and that
+the local forwarding command is still running. Ensure the variable is defined
+before running the check.
 
 ```powershell
 netstat -ano | findstr ":$env:IRODORI_TTS_SERVER_PORT"
@@ -71,6 +81,7 @@ The Windows runtime `.env` must point at the local voice bank that contains
 
 ```env
 VOICE_BANK_DIR=C:\Users\takut\Dev\Irodori-TTS
+IRODORI_TTS_SERVER_HOST=127.0.0.1
 IRODORI_TTS_SERVER_PORT=8923
 ```
 
@@ -109,8 +120,8 @@ changed to the parent directory.
 
 - SSH fails: confirm Tailscale is connected on both machines and use the
   Tailscale address in `IRODORI_REMOTE_HOST`.
-- HTTP health times out: confirm the correct server process is running and
-  listening on `8923`.
+- HTTP health times out: confirm the correct server process is listening on
+  `127.0.0.1:8923` and the local SSH forwarding command is still running.
 - `say.py` cannot find a speaker: confirm the legacy server is running and the
   requested `.speaker.safetensors` exists under
   `C:\Users\takut\Dev\Irodori-TTS\speakers`.

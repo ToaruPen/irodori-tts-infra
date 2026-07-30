@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from irodori_tts_infra.contracts.synthesis import SynthesisRequest
+from irodori_tts_infra.contracts.synthesis import IrodoriStyle, SynthesisRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +21,9 @@ class SynthesisJob:
     require_speaker: bool = False
     num_steps: int = 40
     cfg_scale_text: float = 3.0
+    cfg_scale_caption: float = 3.0
     cfg_scale_speaker: float = 5.0
+    style: IrodoriStyle = "neutral"
     seed: int | None = None
     duration_scale: float = 1.0
     num_candidates: int = 1
@@ -36,7 +38,9 @@ class SynthesisJob:
             ref_embed=resolved_ref_embed,
             num_steps=self.num_steps,
             cfg_scale_text=self.cfg_scale_text,
+            cfg_scale_caption=self.cfg_scale_caption,
             cfg_scale_speaker=self.cfg_scale_speaker,
+            style=self.style,
             seed=self.seed,
             duration_scale=self.duration_scale,
             num_candidates=self.num_candidates,

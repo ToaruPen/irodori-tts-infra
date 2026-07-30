@@ -367,6 +367,26 @@ def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
     assert "'--host', $serverHost, '--port', $port" in script
 
 
+def test_start_service_rejects_non_loopback_host_override() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        service.start_service(
+            remote_host="gpu",
+            remote_dir="C:/irodori",
+            server_host="0.0.0.0",  # noqa: S104 - rejected unsafe override
+        )
+
+
+def test_start_service_rejects_non_loopback_remote_env_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = record_commands(monkeypatch, service)
+
+    service.start_service(remote_host="gpu", remote_dir="C:/irodori")
+
+    script = remote_command(commands[0][0])
+    assert "server host must be loopback" in script
+
+
 def test_start_service_loads_remote_env_before_start_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -395,23 +415,16 @@ def test_rvc_training_sop_is_marked_superseded() -> None:
     assert "voice_bank_rvc.toml" not in rvc_training
 
 
-def test_start_service_quotes_server_host_for_powershell(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    commands = record_commands(monkeypatch, service)
+def test_start_service_rejects_injected_server_host() -> None:
     server_host = "127.0.0.1'; Write-Output injected; '"
 
-    service.start_service(
-        remote_host="gpu",
-        remote_dir="C:/irodori",
-        server_host=server_host,
-        port=9001,
-    )
-
-    script = remote_command(commands[0][0])
-    assert "$serverHost = '127.0.0.1''; Write-Output injected; '''" in script
-    assert "$port = '9001'" in script
-    assert "'--host', $serverHost, '--port', $port" in script
+    with pytest.raises(ValueError, match="loopback"):
+        service.start_service(
+            remote_host="gpu",
+            remote_dir="C:/irodori",
+            server_host=server_host,
+            port=9001,
+        )
 
 
 def test_stop_service_reads_pid_stops_process_and_removes_pid_file(

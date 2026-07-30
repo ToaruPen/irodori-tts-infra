@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from irodori_tts_infra.config import ServerSettings
+from irodori_tts_infra.config.settings import LOOPBACK_HOSTS, ServerSettings
 from irodori_tts_infra.deploy.remote._common import (
     _load_env_script,
     _powershell,
@@ -85,7 +85,7 @@ def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
     default_host = _ps_quote(str(ServerSettings.model_fields["host"].default))
     default_port = _ps_quote(str(ServerSettings.model_fields["port"].default))
     host_expr = (
-        _ps_quote(server_host)
+        _ps_quote(ServerSettings(host=server_host).host)
         if server_host is not None
         else (
             "if ($env:IRODORI_TTS_SERVER_HOST) "
@@ -100,7 +100,13 @@ def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
             f"{{ $env:IRODORI_TTS_SERVER_PORT }} else {{ {default_port} }}"
         )
     )
-    return f"$serverHost = {host_expr}; $port = {port_expr}; "
+    allowed_hosts = ", ".join(_ps_quote(host) for host in sorted(LOOPBACK_HOSTS))
+    return (
+        f"$serverHost = {host_expr}; "
+        f"if (@({allowed_hosts}) -notcontains $serverHost) "
+        "{ throw 'server host must be loopback' }; "
+        f"$port = {port_expr}; "
+    )
 
 
 def _stop_script(remote_dir: str) -> str:

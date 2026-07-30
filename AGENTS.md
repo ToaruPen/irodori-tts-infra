@@ -2,7 +2,8 @@
 
 ## Project
 
-`irodori-tts-infra` is a Python 3.11+ infrastructure project for Irodori-TTS v3 base synthesis with Speaker Inversion voice identity.
+`irodori-tts-infra` is a Python 3.11+ infrastructure project for Irodori-TTS
+v3 VoiceDesign synthesis with Speaker Inversion voice identity.
 
 The import package lives under `src/irodori_tts_infra/`. Tests live under `tests/`.
 Generated audio, model weights, datasets, checkpoints, and local secrets are not source files.
@@ -10,13 +11,16 @@ Generated audio, model weights, datasets, checkpoints, and local secrets are not
 ## Architecture
 
 ```text
-Text → Irodori-TTS v3 base
-     → per-character Speaker Inversion embedding (.speaker.safetensors)
+Text + fixed style preset → Irodori-TTS v3 VoiceDesign
+     + per-character Speaker Inversion embedding (.speaker.safetensors)
      → Multi-metric quality gate (automated pass/fail)
      → Playback / cache
 ```
 
-Voice identity is supplied by the narrator or character `ref_embed` from `voice_bank_speakers.toml`. RVC and VoiceDesign captions are not part of the standard path.
+Voice identity is supplied by the narrator or character `ref_embed` from
+`voice_bank_speakers.toml`. Expressive direction comes from a strict public
+`style` enum mapped server-side to fixed VoiceDesign captions. Arbitrary public
+captions and RVC are not part of the standard path.
 
 ## Commands
 

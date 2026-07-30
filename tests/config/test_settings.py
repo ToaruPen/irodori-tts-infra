@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 DEFAULT_PORT = 8923
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
+DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
 OVERRIDE_PORT = 9001
 OVERRIDE_NUM_STEPS = 24
@@ -39,11 +40,12 @@ def test_settings_defaults_match_phase1_runtime_plan() -> None:
 
     assert client.host == "127.0.0.1"
     assert client.port == DEFAULT_PORT
-    assert server.host == "0.0.0.0"  # noqa: S104
+    assert server.host == "127.0.0.1"
     assert server.port == DEFAULT_PORT
-    assert runtime.checkpoint == "Aratako/Irodori-TTS-500M-v3"
+    assert runtime.checkpoint == "Aratako/Irodori-TTS-600M-v3-VoiceDesign"
     assert runtime.num_steps == DEFAULT_NUM_STEPS
     assert runtime.cfg_scale_text == pytest.approx(DEFAULT_CFG_SCALE_TEXT)
+    assert runtime.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
     assert runtime.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
     assert runtime.seed is None
     assert runtime.duration_scale == pytest.approx(1.0)
@@ -59,6 +61,7 @@ def test_settings_defaults_match_phase1_runtime_plan() -> None:
     assert runtime.compile_model is False
     assert runtime.warmup_num_steps == DEFAULT_NUM_STEPS
     assert runtime.warmup_text == "テスト"
+    assert runtime.warmup_style == "calm"
     assert paths.temp_wav_dir.name == "irodori-tts-wav"
 
 
@@ -69,6 +72,21 @@ def test_runtime_settings_rejects_blank_checkpoint_env(
 
     with pytest.raises(ValidationError, match="checkpoint"):
         IrodoriRuntimeSettings()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "cfg_scale_text",
+        "cfg_scale_caption",
+        "cfg_scale_speaker",
+        "duration_scale",
+        "sway_coeff",
+    ],
+)
+def test_runtime_settings_rejects_non_finite_sampling_values(field: str) -> None:
+    with pytest.raises(ValidationError, match=field):
+        IrodoriRuntimeSettings.model_validate({field: float("inf")})
 
 
 def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -111,6 +129,15 @@ def test_invalid_port_values_are_rejected() -> None:
 
     with pytest.raises(ValidationError, match="greater than or equal"):
         ClientSettings(port=0)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "100.112.161.83", "gpu.example.com"],  # noqa: S104 - rejected inputs
+)
+def test_server_settings_rejects_non_loopback_hosts(host: str) -> None:
+    with pytest.raises(ValidationError, match="loopback"):
+        ServerSettings(host=host)
 
 
 def test_blank_path_values_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

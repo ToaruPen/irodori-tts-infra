@@ -1,16 +1,22 @@
 # irodori-tts-infra
 
-Infrastructure for Japanese novel TTS using Irodori-TTS v3 base and Speaker
+Infrastructure for Japanese TTS using Irodori-TTS v3 VoiceDesign with Speaker
 Inversion embeddings.
 
 ## Runtime Path
 
 ```text
-Text -> Irodori-TTS v3 base -> Speaker Inversion ref_embed -> WAV
+Text + fixed style -> Irodori-TTS v3 VoiceDesign
+                   + Speaker Inversion ref_embed -> WAV
 ```
 
-Voice selection comes from `voice_bank_speakers.toml`; RVC and VoiceDesign
-captions are not part of the standard path.
+Voice selection comes from `voice_bank_speakers.toml`. Clients choose one of
+`neutral`, `calm`, `cheerful`, or `clear`; the server maps it to a fixed
+VoiceDesign caption. Arbitrary captions and RVC are not part of the standard
+path.
+
+The default checkpoint is
+`Aratako/Irodori-TTS-600M-v3-VoiceDesign`.
 
 ## Development
 

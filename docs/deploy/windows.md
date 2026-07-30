@@ -41,14 +41,23 @@ C:\Users\user\irodori-tts-infra\.env
 ```
 
 The Windows `.env` should contain server/runtime settings such as
-`IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
+`IRODORI_TTS_SERVER_HOST`, `IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
 `IRODORI_TTS_PATH_TEMP_WAV_DIR`. Do not commit this file.
+
+The standard runtime uses the 600M v3 VoiceDesign checkpoint:
+
+```env
+IRODORI_TTS_RUNTIME_CHECKPOINT=Aratako/Irodori-TTS-600M-v3-VoiceDesign
+IRODORI_TTS_RUNTIME_CFG_SCALE_CAPTION=3.0
+IRODORI_TTS_RUNTIME_WARMUP_STYLE=calm
+```
 
 For the current trained speaker embeddings, the Windows runtime voice bank can
 point at the Irodori-TTS checkout that owns the speaker files:
 
 ```env
 VOICE_BANK_DIR=C:\Users\takut\Dev\Irodori-TTS
+IRODORI_TTS_SERVER_HOST=127.0.0.1
 IRODORI_TTS_SERVER_PORT=8923
 ```
 
@@ -109,7 +118,7 @@ irodori-tts-deploy deploy-bootstrap \
 environment, then launches:
 
 ```powershell
-.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port $env:IRODORI_TTS_SERVER_PORT
+.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 127.0.0.1 --port $env:IRODORI_TTS_SERVER_PORT
 ```
 
 The PID-file wrapper is intentionally minimal. If the server fails during import

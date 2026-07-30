@@ -41,9 +41,11 @@ FAKE_WAV_BYTES = b"RIFF\x08\x00\x00\x00WAVEfake"
 DEFAULT_SAMPLE_RATE = 24_000
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
+DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
 CUSTOM_STEPS = 12
 CUSTOM_CFG_TEXT = 2.25
+CUSTOM_CFG_CAPTION = 2.75
 CUSTOM_CFG_SPEAKER = 4.25
 CUSTOM_SEED = 123
 CUSTOM_DURATION_SCALE = 1.25
@@ -64,10 +66,13 @@ class FakeRuntimeResult:
 
 class FakeSamplingRequest:
     text: str
+    caption: str | None
     ref_embed: str
     num_steps: int
     cfg_scale_text: float
+    cfg_scale_caption: float
     cfg_scale_speaker: float
+    cfg_guidance_mode: str
     seed: int | None
     duration_scale: float
     num_candidates: int
@@ -79,10 +84,13 @@ class FakeSamplingRequest:
     def __init__(self, **kwargs: object) -> None:
         self.kwargs = kwargs
         self.text = cast("str", kwargs.get("text", ""))
+        self.caption = cast("str | None", kwargs.get("caption"))
         self.ref_embed = cast("str", kwargs.get("ref_embed", ""))
         self.num_steps = cast("int", kwargs.get("num_steps", 0))
         self.cfg_scale_text = cast("float", kwargs.get("cfg_scale_text", 0.0))
+        self.cfg_scale_caption = cast("float", kwargs.get("cfg_scale_caption", 0.0))
         self.cfg_scale_speaker = cast("float", kwargs.get("cfg_scale_speaker", 0.0))
+        self.cfg_guidance_mode = cast("str", kwargs.get("cfg_guidance_mode", ""))
         self.seed = cast("int | None", kwargs.get("seed"))
         self.duration_scale = cast("float", kwargs.get("duration_scale", 0.0))
         self.num_candidates = cast("int", kwargs.get("num_candidates", 0))
@@ -188,6 +196,7 @@ def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
         "checkpoint": "org/model",
         "num_steps": DEFAULT_NUM_STEPS,
         "cfg_scale_text": DEFAULT_CFG_SCALE_TEXT,
+        "cfg_scale_caption": DEFAULT_CFG_SCALE_CAPTION,
         "cfg_scale_speaker": DEFAULT_CFG_SCALE_SPEAKER,
         "model_device": "cuda",
         "model_precision": "bf16",
@@ -195,6 +204,7 @@ def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
         "codec_precision": "fp32",
         "warmup_num_steps": DEFAULT_NUM_STEPS,
         "warmup_text": "テスト",
+        "warmup_style": "calm",
         "decode_mode": "batch",
         "context_kv_cache": True,
         "compile_model": False,
@@ -209,7 +219,9 @@ def synthesis_request(**overrides: object) -> SynthesisRequest:
         "ref_embed": DEFAULT_REF_EMBED,
         "num_steps": CUSTOM_STEPS,
         "cfg_scale_text": CUSTOM_CFG_TEXT,
+        "cfg_scale_caption": CUSTOM_CFG_CAPTION,
         "cfg_scale_speaker": CUSTOM_CFG_SPEAKER,
+        "style": "clear",
         "seed": CUSTOM_SEED,
         "duration_scale": CUSTOM_DURATION_SCALE,
         "num_candidates": CUSTOM_NUM_CANDIDATES,
@@ -273,7 +285,10 @@ def test_synthesize_forwards_sampling_request_fields() -> None:
     assert call.ref_embed == DEFAULT_REF_EMBED
     assert call.num_steps == CUSTOM_STEPS
     assert call.cfg_scale_text == pytest.approx(CUSTOM_CFG_TEXT)
+    assert call.caption == "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。"
+    assert call.cfg_scale_caption == pytest.approx(CUSTOM_CFG_CAPTION)
     assert call.cfg_scale_speaker == pytest.approx(CUSTOM_CFG_SPEAKER)
+    assert call.cfg_guidance_mode == "independent"
     assert call.seed == CUSTOM_SEED
     assert call.duration_scale == pytest.approx(CUSTOM_DURATION_SCALE)
     assert call.num_candidates == CUSTOM_NUM_CANDIDATES
@@ -290,6 +305,15 @@ def test_synthesize_normalizes_ref_embed_before_sampling_request() -> None:
     backend.synthesize(synthesis_request(ref_embed=f"  {DEFAULT_REF_EMBED}  "))
 
     assert runtime.calls[0].ref_embed == DEFAULT_REF_EMBED
+
+
+def test_synthesize_neutral_style_omits_caption() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.synthesize(synthesis_request(style="neutral"))
+
+    assert runtime.calls[0].caption is None
 
 
 def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:
@@ -356,7 +380,10 @@ def test_warm_up_uses_warmup_settings_and_ref_embed() -> None:
     assert call.text == "準備です。"
     assert call.ref_embed == NARRATOR_REF_EMBED
     assert call.num_steps == WARMUP_STEPS
+    assert call.caption == "穏やかで優しい女性の声で、自然に話す。"
+    assert call.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
     assert call.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+    assert call.cfg_guidance_mode == "independent"
 
 
 def test_warm_up_normalizes_ref_embed_before_sampling_request() -> None:

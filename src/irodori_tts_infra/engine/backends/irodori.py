@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from irodori_tts_infra.config.settings import PathSettings
+from irodori_tts_infra.contracts.synthesis import style_caption
 from irodori_tts_infra.engine.errors import BackendUnavailableError
 from irodori_tts_infra.engine.models import SynthesizedAudio
 
@@ -88,10 +89,13 @@ class IrodoriBaseBackend:
 
         sampling_request = self._sampling_request_cls(
             text=request.text,
+            caption=style_caption(request.style),
             ref_embed=ref_embed,
             num_steps=request.num_steps,
             cfg_scale_text=request.cfg_scale_text,
+            cfg_scale_caption=request.cfg_scale_caption,
             cfg_scale_speaker=request.cfg_scale_speaker,
+            cfg_guidance_mode="independent",
             seed=request.seed,
             duration_scale=request.duration_scale,
             num_candidates=request.num_candidates,
@@ -113,10 +117,13 @@ class IrodoriBaseBackend:
         normalized_ref_embed = ref_embed.strip()
         request = self._sampling_request_cls(
             text=self._settings.warmup_text,
+            caption=style_caption(self._settings.warmup_style),
             ref_embed=normalized_ref_embed,
             num_steps=self._settings.warmup_num_steps,
             cfg_scale_text=self._settings.cfg_scale_text,
+            cfg_scale_caption=self._settings.cfg_scale_caption,
             cfg_scale_speaker=self._settings.cfg_scale_speaker,
+            cfg_guidance_mode="independent",
             seed=self._settings.seed,
             duration_scale=self._settings.duration_scale,
             num_candidates=self._settings.num_candidates,

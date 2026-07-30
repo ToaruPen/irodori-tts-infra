@@ -21,11 +21,13 @@ from irodori_tts_infra.contracts import (
     SynthesisSegment,
     VoiceProfileResponse,
 )
+from irodori_tts_infra.contracts.synthesis import style_caption
 
 pytestmark = pytest.mark.unit
 
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
+DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
 
 
@@ -38,7 +40,9 @@ def test_synthesis_request_defaults_and_validation() -> None:
     assert request.ref_embed == "speakers/narrator.speaker.safetensors"
     assert request.num_steps == DEFAULT_NUM_STEPS
     assert request.cfg_scale_text == pytest.approx(DEFAULT_CFG_SCALE_TEXT)
+    assert request.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
     assert request.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+    assert request.style == "neutral"
     assert request.seed is None
     assert request.duration_scale == pytest.approx(1.0)
     assert request.num_candidates == 1
@@ -63,6 +67,43 @@ def test_synthesis_request_defaults_and_validation() -> None:
             ref_embed="speakers/narrator.speaker.safetensors",
             num_candidates=MAX_NUM_CANDIDATES + 1,
         )
+    with pytest.raises(ValidationError, match="style"):
+        SynthesisRequest(text="こんにちは", style="dramatic")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="cfg_scale_caption"):
+        SynthesisRequest(text="こんにちは", cfg_scale_caption=0)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "cfg_scale_text",
+        "cfg_scale_caption",
+        "cfg_scale_speaker",
+        "duration_scale",
+        "sway_coeff",
+    ],
+)
+def test_synthesis_request_rejects_non_finite_sampling_values(field: str) -> None:
+    payload = f'{{"text":"こんにちは","{field}":1e309}}'
+
+    with pytest.raises(ValidationError, match=field):
+        SynthesisRequest.model_validate_json(payload)
+
+
+@pytest.mark.parametrize(
+    ("style", "expected"),
+    [
+        ("neutral", None),
+        ("calm", "穏やかで優しい女性の声で、自然に話す。"),
+        ("cheerful", "明るく親しみやすい女性の声で、自然に話す。"),
+        ("clear", "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。"),
+    ],
+)
+def test_style_caption_maps_public_style_to_fixed_caption(
+    style: str,
+    expected: str | None,
+) -> None:
+    assert style_caption(style) == expected  # type: ignore[arg-type]
 
 
 def test_synthesis_request_normalizes_optional_identifiers() -> None:

@@ -481,7 +481,9 @@ def test_synthesis_job_maps_to_contract_request() -> None:
         ref_embed="speakers/mika.speaker.safetensors",
         num_steps=24,
         cfg_scale_text=2.5,
+        cfg_scale_caption=2.75,
         cfg_scale_speaker=4.0,
+        style="cheerful",
         seed=123,
         duration_scale=1.1,
         num_candidates=2,
@@ -495,7 +497,9 @@ def test_synthesis_job_maps_to_contract_request() -> None:
     assert request.ref_embed == job.ref_embed
     assert request.num_steps == job.num_steps
     assert request.cfg_scale_text == pytest.approx(job.cfg_scale_text)
+    assert request.cfg_scale_caption == pytest.approx(job.cfg_scale_caption)
     assert request.cfg_scale_speaker == pytest.approx(job.cfg_scale_speaker)
+    assert request.style == job.style
     assert request.seed == job.seed
     assert request.duration_scale == pytest.approx(job.duration_scale)
     assert request.num_candidates == job.num_candidates

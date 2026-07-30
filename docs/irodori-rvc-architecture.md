@@ -1,20 +1,22 @@
-# Irodori-TTS v3 Speaker Inversion Architecture
+# Irodori-TTS v3 VoiceDesign + Speaker Inversion Architecture
 
-> Supersedes the previous VoiceDesign + RVC standard pipeline.
+> The 2026-07-27 VoiceDesign service design supersedes the earlier v3-base-only
+> standard path while retaining its server-side Speaker Inversion identity.
 
 ## Standard Pipeline
 
 ```text
-Text + speaker tag
-  -> Irodori-TTS v3 base
-  -> Speaker Inversion embedding (.speaker.safetensors)
+Text + speaker tag + fixed style
+  -> Irodori-TTS v3 VoiceDesign
+  + Speaker Inversion embedding (.speaker.safetensors)
   -> Multi-metric quality gate
   -> Playback / cache
 ```
 
-The default checkpoint is `Aratako/Irodori-TTS-500M-v3`. Each narrator or
-character voice is selected by a Speaker Inversion embedding, not by a
-VoiceDesign caption and not by an RVC conversion stage.
+The default checkpoint is `Aratako/Irodori-TTS-600M-v3-VoiceDesign`. Each
+narrator or character voice is selected by a Speaker Inversion embedding.
+The fixed VoiceDesign caption controls delivery rather than identity, and there
+is no RVC conversion stage.
 
 ## Voice Bank Manifest
 
@@ -43,6 +45,8 @@ Public HTTP requests carry portable speaker identity:
 - `speaker` for dialogue, omitted for narrator
 - `num_steps`
 - `cfg_scale_text`
+- `style`
+- `cfg_scale_caption`
 - `cfg_scale_speaker`
 - `seed`
 - `duration_scale`
@@ -55,16 +59,16 @@ the backend call. The backend boundary then receives the resolved `ref_embed`
 plus the same v3 sampling fields. Public HTTP clients must not send local
 `ref_embed` paths because client and GPU server filesystems may differ.
 
-The backend must not send `caption`, `cfg_scale_caption`, or `no_ref` in the
-standard path.
+Public clients must not send `caption` or `no_ref`. The server maps `style` to
+a fixed caption and sends it with `cfg_scale_caption` to the backend.
 
 ## Superseded RVC Material
 
 Earlier design notes used VoiceDesign for expressive source audio and RVC for
-identity correction. That path is no longer the standard architecture for this
-repository. Historical RVC docs may remain under ADR or old planning files as
-decision history only; implementation, tests, and new operational docs should
-target v3 base + Speaker Inversion.
+identity correction. RVC is no longer part of the standard architecture.
+Historical RVC and v3-base-only documents may remain as decision history;
+implementation and current operational docs target VoiceDesign plus Speaker
+Inversion.
 
 ## Quality Gate Direction
 
