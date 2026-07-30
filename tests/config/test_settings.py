@@ -84,9 +84,13 @@ def test_runtime_settings_rejects_blank_checkpoint_env(
         "sway_coeff",
     ],
 )
-def test_runtime_settings_rejects_non_finite_sampling_values(field: str) -> None:
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_runtime_settings_rejects_non_finite_sampling_values(
+    field: str,
+    value: float,
+) -> None:
     with pytest.raises(ValidationError, match=field):
-        IrodoriRuntimeSettings.model_validate({field: float("inf")})
+        IrodoriRuntimeSettings.model_validate({field: value})
 
 
 def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -138,6 +142,21 @@ def test_invalid_port_values_are_rejected() -> None:
 def test_server_settings_rejects_non_loopback_hosts(host: str) -> None:
     with pytest.raises(ValidationError, match="loopback"):
         ServerSettings(host=host)
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", "127.0.0.1"),
+        (" ::1 ", "::1"),
+        (" LOCALHOST ", "localhost"),
+    ],
+)
+def test_server_settings_accepts_and_normalizes_loopback_hosts(
+    host: str,
+    expected: str,
+) -> None:
+    assert ServerSettings(host=host).host == expected
 
 
 def test_blank_path_values_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

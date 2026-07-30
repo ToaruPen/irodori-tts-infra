@@ -313,7 +313,10 @@ def test_synthesize_neutral_style_omits_caption() -> None:
 
     backend.synthesize(synthesis_request(style="neutral"))
 
-    assert runtime.calls[0].caption is None
+    call = runtime.calls[0]
+    assert call.caption is None
+    assert call.cfg_scale_caption == pytest.approx(CUSTOM_CFG_CAPTION)
+    assert call.cfg_guidance_mode == "independent"
 
 
 def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:

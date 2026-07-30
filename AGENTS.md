@@ -12,7 +12,7 @@ Generated audio, model weights, datasets, checkpoints, and local secrets are not
 
 ```text
 Text + fixed style preset → Irodori-TTS v3 VoiceDesign
-     + per-character Speaker Inversion embedding (.speaker.safetensors)
+     + per-speaker Speaker Inversion embedding (.speaker.safetensors)
      → Multi-metric quality gate (automated pass/fail)
      → Playback / cache
 ```

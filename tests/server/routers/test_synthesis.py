@@ -542,6 +542,32 @@ def test_synthesize_batch_rejects_private_voicedesign_fields(
     _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
 
 
+def test_synthesize_batch_accepts_style_and_caption_cfg(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    synthesizer = FakeSynthesizer()
+    app = create_app(pipeline_factory(synthesizer))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize_batch",
+            json={
+                "segments": [
+                    {
+                        "segment_index": 0,
+                        "text": "本文",
+                        "style": "cheerful",
+                        "cfg_scale_caption": 2.5,
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert synthesizer.calls[0].style == "cheerful"
+    assert synthesizer.calls[0].cfg_scale_caption == pytest.approx(2.5)
+
+
 def test_synthesize_returns_500_when_pipeline_missing(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
@@ -639,17 +665,14 @@ def test_synthesize_stream_emits_terminal_header_for_empty_wav_bytes(
 def test_synthesize_stream_accepts_single_request(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
-    app = create_app(
-        pipeline_factory(
-            FakeSynthesizer(
-                responses=[
-                    FakeSynthResponse(
-                        audio=SynthesizedAudio(wav_bytes=b"RIFFsingle", sample_rate=24_000),
-                    ),
-                ],
+    synthesizer = FakeSynthesizer(
+        responses=[
+            FakeSynthResponse(
+                audio=SynthesizedAudio(wav_bytes=b"RIFFsingle", sample_rate=24_000),
             ),
-        ),
+        ],
     )
+    app = create_app(pipeline_factory(synthesizer))
     app.state.max_chunk_size = SPLIT_STREAM_CHUNK_SIZE
 
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -657,6 +680,8 @@ def test_synthesize_stream_accepts_single_request(
             "/synthesize_stream",
             json={
                 "text": "一つ目",
+                "style": "clear",
+                "cfg_scale_caption": 2.5,
             },
         )
 
@@ -665,6 +690,8 @@ def test_synthesize_stream_accepts_single_request(
     assert [header.segment_index for header, _ in chunks] == [0, 1, 2]
     assert [payload for _, payload in chunks] == [b"RIFF", b"sing", b"le"]
     assert [header.final for header, _ in chunks] == [False, False, True]
+    assert synthesizer.calls[0].style == "clear"
+    assert synthesizer.calls[0].cfg_scale_caption == pytest.approx(2.5)
 
 
 @pytest.mark.parametrize(

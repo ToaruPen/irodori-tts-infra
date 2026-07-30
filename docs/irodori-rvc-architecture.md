@@ -45,7 +45,7 @@ Public HTTP requests carry portable speaker identity:
 - `speaker` for dialogue, omitted for narrator
 - `num_steps`
 - `cfg_scale_text`
-- `style`
+- `style`: `neutral`（既定）、`calm`、`cheerful`、`clear` の厳密な列挙値
 - `cfg_scale_caption`
 - `cfg_scale_speaker`
 - `seed`

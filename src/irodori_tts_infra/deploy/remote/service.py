@@ -103,6 +103,7 @@ def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
     allowed_hosts = ", ".join(_ps_quote(host) for host in sorted(LOOPBACK_HOSTS))
     return (
         f"$serverHost = {host_expr}; "
+        "$serverHost = $serverHost.Trim().ToLowerInvariant(); "
         f"if (@({allowed_hosts}) -notcontains $serverHost) "
         "{ throw 'server host must be loopback' }; "
         f"$port = {port_expr}; "

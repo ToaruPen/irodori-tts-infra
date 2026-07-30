@@ -40,6 +40,7 @@ Check the standard infra FastAPI server:
 
 ```bash
 ssh -N \
+  -o ExitOnForwardFailure=yes \
   -L "${IRODORI_TTS_SERVER_PORT}:127.0.0.1:${IRODORI_TTS_SERVER_PORT}" \
   "$IRODORI_REMOTE_HOST"
 ```
@@ -121,7 +122,8 @@ changed to the parent directory.
 - SSH fails: confirm Tailscale is connected on both machines and use the
   Tailscale address in `IRODORI_REMOTE_HOST`.
 - HTTP health times out: confirm the correct server process is listening on
-  `127.0.0.1:8923` and the local SSH forwarding command is still running.
+  `127.0.0.1:${IRODORI_TTS_SERVER_PORT}` and the local SSH forwarding command
+  is still running.
 - `say.py` cannot find a speaker: confirm the legacy server is running and the
   requested `.speaker.safetensors` exists under
   `C:\Users\takut\Dev\Irodori-TTS\speakers`.

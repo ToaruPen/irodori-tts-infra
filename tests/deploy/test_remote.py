@@ -376,7 +376,7 @@ def test_start_service_rejects_non_loopback_host_override() -> None:
         )
 
 
-def test_start_service_rejects_non_loopback_remote_env_host(
+def test_start_service_normalizes_and_guards_remote_env_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands = record_commands(monkeypatch, service)
@@ -384,7 +384,11 @@ def test_start_service_rejects_non_loopback_remote_env_host(
     service.start_service(remote_host="gpu", remote_dir="C:/irodori")
 
     script = remote_command(commands[0][0])
-    assert "server host must be loopback" in script
+    normalize = "$serverHost = $serverHost.Trim().ToLowerInvariant()"
+    guard = "server host must be loopback"
+    assert normalize in script
+    assert script.index(normalize) < script.index(guard)
+    assert script.index(guard) < script.index("Start-Process")
 
 
 def test_start_service_loads_remote_env_before_start_process(

@@ -149,7 +149,7 @@ def test_phase2_chain_uses_speaker_embeddings_for_dialogue_and_narration(
     assert result.total_elapsed_seconds < MAX_SMOKE_SECONDS
 
 
-def test_voicedesign_combines_caption_and_speaker_embedding(
+def test_voicedesign_style_synthesizes_with_speaker_embedding(
     phase2_smoke_setup: SmokeSetup,
 ) -> None:
     pipeline, _voice_profile, smoke_character_name = phase2_smoke_setup

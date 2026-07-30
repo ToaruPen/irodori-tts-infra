@@ -19,7 +19,8 @@ Windows GPU上の Irodori TTS を `Aratako/Irodori-TTS-600M-v3-VoiceDesign`
 - サービスが `style` を日本語の固定captionへ決定論的に変換する。
 - `neutral` はcaptionを付与しない。
 - 話者は既存の Speaker Inversion voice bankから名前で選ぶ。
-- VoiceDesign captionとSpeaker Inversion埋め込みは同時に推論へ渡す。
+- `neutral` 以外では固定VoiceDesign captionとSpeaker Inversion埋め込みを
+  同時に推論へ渡す。`neutral` ではcaption自体を渡さない。
 - 自動フォールバックは設けない。起動失敗や推論失敗は明示的な失敗として返す。
 - Windows側のHTTPポートはloopbackに限定し、Picoからは既存の保護された
   SSHトンネルを通して接続する。
@@ -60,10 +61,12 @@ captionの追加・変更はAPI契約の変更として、音質と推論時間�
 upstreamは埋め込みをinversion学習時と同じ基盤モデルで使うよう案内しているため、
 600M VoiceDesignで読み込めることだけでは互換性を確認したことにならない。
 
-既定checkpointの切り替えは、Windows GPU上で既存voice bankの埋め込みを使い、
-captionなしとcaptionありの両方で合成成功、音声の非破損、話者同一性を確認してから
-行う。互換性または品質を確認できない場合は500M v3を標準のまま維持し、
-600M VoiceDesign用のSpeaker Inversion再学習を別変更として扱う。
+この変更は600M VoiceDesignを既定値とする移行後の状態を実装し、その状態で
+互換性を検証する。標準ブランチへのマージを移行の昇格点とし、Windows GPU上で
+既存voice bankの埋め込みを使ってcaptionなしとcaptionありの合成成功、音声の
+非破損、話者同一性を確認するまではDraftのまま維持する。互換性または品質を
+確認できない場合はマージせず、500M v3を標準のまま維持する。600M VoiceDesign用の
+Speaker Inversion再学習は別変更として扱う。
 
 ## 検証
 

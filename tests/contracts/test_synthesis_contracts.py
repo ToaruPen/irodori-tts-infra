@@ -83,11 +83,30 @@ def test_synthesis_request_defaults_and_validation() -> None:
         "sway_coeff",
     ],
 )
-def test_synthesis_request_rejects_non_finite_sampling_values(field: str) -> None:
-    payload = f'{{"text":"こんにちは","{field}":1e309}}'
+@pytest.mark.parametrize("raw_value", ["1e309", "-1e309"])
+def test_synthesis_request_rejects_infinite_sampling_values(
+    field: str,
+    raw_value: str,
+) -> None:
+    payload = f'{{"text":"こんにちは","{field}":{raw_value}}}'
 
     with pytest.raises(ValidationError, match=field):
         SynthesisRequest.model_validate_json(payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "cfg_scale_text",
+        "cfg_scale_caption",
+        "cfg_scale_speaker",
+        "duration_scale",
+        "sway_coeff",
+    ],
+)
+def test_synthesis_request_rejects_nan_sampling_values(field: str) -> None:
+    with pytest.raises(ValidationError, match=field):
+        SynthesisRequest.model_validate({"text": "こんにちは", field: float("nan")})
 
 
 @pytest.mark.parametrize(
