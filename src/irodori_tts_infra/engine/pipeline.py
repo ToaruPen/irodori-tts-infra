@@ -10,6 +10,8 @@ from irodori_tts_infra.engine.errors import (
     BackpressureError,
     EmptyBatchError,
     EngineError,
+    RuntimeGenerationMismatchError,
+    VoiceNotFoundError,
 )
 from irodori_tts_infra.engine.models import PipelineConfig, SynthesisJob
 from irodori_tts_infra.text.models import SegmentKind
@@ -43,6 +45,10 @@ class SynthesisPipeline:
     def voice_profile(self) -> VoiceProfile:
         return self._voice_profile
 
+    @property
+    def generation(self) -> str:
+        return self._config.generation
+
     @staticmethod
     def plan_segment(segment_index: int, segment: Segment) -> SynthesisJob:
         return SynthesisJob(
@@ -53,12 +59,13 @@ class SynthesisPipeline:
         )
 
     def synthesize_job(self, job: SynthesisJob) -> SynthesisResult:
+        resolved_ref_embed = self._resolve_job_ref_embed(job)
         if not self._acquire_slot():
             msg = "backend capacity unavailable"
             raise BackpressureError(msg)
 
         try:
-            request = job.to_request(ref_embed=self._resolve_job_ref_embed(job))
+            request = job.to_request(ref_embed=resolved_ref_embed)
             started = time.perf_counter()
             try:
                 audio = self._synthesizer.synthesize(request)
@@ -110,6 +117,16 @@ class SynthesisPipeline:
         return jobs
 
     def _resolve_job_ref_embed(self, job: SynthesisJob) -> str:
+        if job.if_generation is not None and job.if_generation != self._config.generation:
+            msg = "requested runtime generation does not match active generation"
+            raise RuntimeGenerationMismatchError(msg)
+        if job.voice_id is not None:
+            try:
+                voice = self._voice_profile.resolve_voice_id(job.voice_id)
+            except KeyError as exc:
+                msg = "requested voice is not available"
+                raise VoiceNotFoundError(msg) from exc
+            return str(voice.speaker.ref_embed)
         if job.ref_embed is not None:
             return job.ref_embed
         if job.speaker is None:

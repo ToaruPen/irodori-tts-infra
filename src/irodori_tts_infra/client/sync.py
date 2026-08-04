@@ -17,6 +17,7 @@ from irodori_tts_infra.contracts import (
     STREAM_HEADER_VERSION,
     BatchSynthesisRequest,
     BatchSynthesisResult,
+    CapabilitiesResponse,
     HealthResponse,
     StreamChunkHeader,
     StreamHandshakeHeader,
@@ -62,6 +63,10 @@ class SyncIrodoriClient:
     def health(self) -> HealthResponse:
         response = self._request("GET", "/health")
         return HealthResponse.model_validate_json(response.content)
+
+    def capabilities(self) -> CapabilitiesResponse:
+        response = self._request("GET", "/capabilities")
+        return CapabilitiesResponse.model_validate_json(response.content)
 
     def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
         response = self._request("POST", "/synthesize", json=_json_body(request))

@@ -14,9 +14,11 @@ from irodori_tts_infra.client.errors import (
     ClientTimeoutError,
     ClientUnavailableError,
 )
+from irodori_tts_infra.config import ClientSettings
 from irodori_tts_infra.contracts import (
     BatchSynthesisRequest,
     BatchSynthesisResult,
+    CapabilitiesResponse,
     ErrorPayload,
     HealthResponse,
     StreamChunkHeader,
@@ -24,6 +26,7 @@ from irodori_tts_infra.contracts import (
     SynthesisRequest,
     SynthesisResult,
     SynthesisSegment,
+    VoiceCapability,
 )
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer, FakeSynthResponse
 from irodori_tts_infra.engine.models import SynthesizedAudio
@@ -105,10 +108,34 @@ async def test_health_returns_contract_from_get_health() -> None:
     assert await _client(httpx.MockTransport(handler)).health() == health
 
 
+@pytest.mark.parametrize("count", [0, 3])
+@pytest.mark.asyncio
+async def test_capabilities_returns_strict_contract_from_get_capabilities(count: int) -> None:
+    capabilities = CapabilitiesResponse(
+        generation="fixture-generation",
+        ready=True,
+        readiness="ready",
+        voices=tuple(
+            VoiceCapability(id=f"fixture-{index}", label=f"Fixture {index}")
+            for index in range(count)
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/capabilities"
+        return _json_response(capabilities)
+
+    result = await _client(httpx.MockTransport(handler)).capabilities()
+
+    assert result == capabilities
+
+
 @pytest.mark.asyncio
 async def test_default_base_url_uses_client_settings() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url == httpx.URL("http://127.0.0.1:8923/health")
+        settings = ClientSettings()
+        assert request.url == httpx.URL(f"http://{settings.host}:{settings.port}/health")
         return _json_response(HealthResponse())
 
     client = AsyncIrodoriClient(transport=httpx.MockTransport(handler))
@@ -118,9 +145,7 @@ async def test_default_base_url_uses_client_settings() -> None:
 
 @pytest.mark.asyncio
 async def test_synthesize_posts_request_and_returns_result() -> None:
-    synthesis_request = SynthesisRequest(
-        text="こんにちは", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="こんにちは")
     synthesis_result = SynthesisResult(
         segment_index=0,
         wav_bytes=b"RIFF-single",
@@ -145,12 +170,10 @@ async def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> 
             SynthesisSegment(
                 segment_index=0,
                 text="地の文です。",
-                ref_embed="speakers/narrator.speaker.safetensors",
             ),
             SynthesisSegment(
                 segment_index=1,
                 text="台詞です。",
-                ref_embed="speakers/narrator.speaker.safetensors",
             ),
         ]
     )
@@ -175,9 +198,7 @@ async def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> 
 
 @pytest.mark.asyncio
 async def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks() -> None:
-    synthesis_request = SynthesisRequest(
-        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="長い本文です。")
     payloads = [b"RI", b"FF", b"-wav"]
     paths: list[str] = []
 
@@ -286,9 +307,7 @@ async def test_synthesize_stream_reconstructs_batch_stream_from_asgi_server() ->
 
 @pytest.mark.asyncio
 async def test_synthesize_stream_yields_payload_before_response_completes() -> None:
-    synthesis_request = SynthesisRequest(
-        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="長い本文です。")
     first_frame = (
         StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
         + StreamChunkHeader(segment_index=0, byte_length=2, final=False).to_bytes()
@@ -316,9 +335,7 @@ async def test_synthesize_stream_yields_payload_before_response_completes() -> N
 
 @pytest.mark.asyncio
 async def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> None:
-    synthesis_request = SynthesisRequest(
-        text="境界値です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="境界値です。")
     payloads = [b"", b"abcd"]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -368,9 +385,7 @@ async def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths(
 )
 @pytest.mark.asyncio
 async def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(
-        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="異常系です。")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -397,9 +412,7 @@ async def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: s
 )
 @pytest.mark.asyncio
 async def test_synthesize_stream_rejects_malformed_frames(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(
-        text="壊れたフレームです。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="壊れたフレームです。")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -422,9 +435,7 @@ async def test_synthesize_stream_error_responses_map_to_typed_client_errors(
     status_code: int,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(
-        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="異常系です。")
     error_payload = ErrorPayload(
         code="server_busy",
         message="server cannot accept work",
@@ -457,9 +468,7 @@ async def test_synthesize_stream_open_failures_map_to_typed_client_errors(
     message: str,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(
-        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="異常系です。")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":

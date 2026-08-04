@@ -14,12 +14,15 @@ from irodori_tts_infra.engine.errors import (
     BackendUnavailableError,
     BackpressureError,
     EmptyBatchError,
+    RuntimeGenerationMismatchError,
+    VoiceNotFoundError,
 )
 from irodori_tts_infra.engine.models import PipelineConfig, SynthesisJob, SynthesizedAudio
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.text.models import Segment, SegmentKind
 from irodori_tts_infra.voice_bank import (
     CharacterVoice,
+    PortableVoice,
     SpeakerEmbeddingProfile,
     VoiceProfile,
 )
@@ -27,7 +30,8 @@ from irodori_tts_infra.voice_bank import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from irodori_tts_infra.contracts.synthesis import SynthesisRequest, SynthesisResult
+    from irodori_tts_infra.contracts.synthesis import SynthesisResult
+    from irodori_tts_infra.engine.models import ResolvedSynthesisRequest
     from irodori_tts_infra.engine.protocols import Synthesizer
 
 pytestmark = pytest.mark.unit
@@ -46,7 +50,7 @@ class BlockingSynthesizer:
         release_events: list[threading.Event] | None = None,
         wav_bytes: bytes = b"RIFFblocking",
     ) -> None:
-        self.calls: list[SynthesisRequest] = []
+        self.calls: list[ResolvedSynthesisRequest] = []
         self.enter_events: list[threading.Event] = []
         self.max_in_flight = 0
         self._in_flight = 0
@@ -54,7 +58,7 @@ class BlockingSynthesizer:
         self._release_events = release_events
         self._wav_bytes = wav_bytes
 
-    def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
+    def synthesize(self, request: ResolvedSynthesisRequest) -> SynthesizedAudio:
         with self._lock:
             call_index = len(self.calls)
             self.calls.append(request)
@@ -94,6 +98,25 @@ def profile() -> VoiceProfile:
             "speakers/narrator.speaker.safetensors",  # type: ignore[arg-type]
         ),
     )
+
+
+def catalog_profile(count: int) -> VoiceProfile:
+    narrator = SpeakerEmbeddingProfile(
+        "speakers/fixture-narrator.speaker.safetensors",  # type: ignore[arg-type]
+    )
+    catalog = tuple(
+        PortableVoice(
+            id=f"fixture-voice-{index}",
+            label=f"Fixture voice {index}",
+            aliases=(f"fixture-alias-{index}",),
+            default=index == 0,
+            speaker=SpeakerEmbeddingProfile(
+                f"speakers/fixture-{index}.speaker.safetensors",  # type: ignore[arg-type]
+            ),
+        )
+        for index in range(count)
+    )
+    return VoiceProfile(characters={}, narrator=narrator, catalog=catalog)
 
 
 def narration(text: str = "地の文です。") -> Segment:
@@ -231,6 +254,76 @@ def test_single_dialogue_segment_uses_known_speaker_ref_embed() -> None:
     pipeline.synthesize_batch([dialogue()])
 
     assert fake.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
+
+
+@pytest.mark.parametrize("selector_kind", ["id", "alias"])
+def test_versioned_voice_id_and_alias_resolve_to_catalog_embedding(
+    selector_kind: str,
+) -> None:
+    fake = FakeSynthesizer()
+    voice_profile = catalog_profile(3)
+    selected = voice_profile.catalog[-1]
+    selector = selected.id if selector_kind == "id" else selected.aliases[0]
+    pipeline = make_pipeline(
+        fake,
+        voice_profile=voice_profile,
+        config=PipelineConfig(generation="fixture-generation"),
+    )
+
+    pipeline.synthesize_job(
+        SynthesisJob(
+            segment_index=0,
+            text="fixture text",
+            voice_id=selector,
+            if_generation="fixture-generation",
+        )
+    )
+
+    assert len(fake.calls) == 1
+    assert fake.calls[0].ref_embed == str(selected.speaker.ref_embed)
+
+
+def test_generation_mismatch_fails_before_backend_call() -> None:
+    fake = FakeSynthesizer()
+    voice_profile = catalog_profile(2)
+    pipeline = make_pipeline(
+        fake,
+        voice_profile=voice_profile,
+        config=PipelineConfig(generation="active-generation"),
+    )
+
+    with pytest.raises(RuntimeGenerationMismatchError, match="generation"):
+        pipeline.synthesize_job(
+            SynthesisJob(
+                segment_index=0,
+                text="fixture text",
+                voice_id=voice_profile.catalog[0].id,
+                if_generation="stale-generation",
+            )
+        )
+
+    assert fake.calls == []
+
+
+def test_unknown_versioned_voice_fails_before_backend_call() -> None:
+    fake = FakeSynthesizer()
+    pipeline = make_pipeline(
+        fake,
+        voice_profile=catalog_profile(2),
+        config=PipelineConfig(generation="fixture-generation"),
+    )
+
+    with pytest.raises(VoiceNotFoundError, match="voice"):
+        pipeline.synthesize_job(
+            SynthesisJob(
+                segment_index=0,
+                text="fixture text",
+                voice_id="fixture-missing-voice",
+                if_generation="fixture-generation",
+            )
+        )
+
+    assert fake.calls == []
 
 
 def test_unknown_speaker_raises_backend_unavailable_error() -> None:
@@ -481,7 +574,9 @@ def test_synthesis_job_maps_to_contract_request() -> None:
         ref_embed="speakers/mika.speaker.safetensors",
         num_steps=24,
         cfg_scale_text=2.5,
+        cfg_scale_caption=2.75,
         cfg_scale_speaker=4.0,
+        style="cheerful",
         seed=123,
         duration_scale=1.1,
         num_candidates=2,
@@ -495,7 +590,9 @@ def test_synthesis_job_maps_to_contract_request() -> None:
     assert request.ref_embed == job.ref_embed
     assert request.num_steps == job.num_steps
     assert request.cfg_scale_text == pytest.approx(job.cfg_scale_text)
+    assert request.cfg_scale_caption == pytest.approx(job.cfg_scale_caption)
     assert request.cfg_scale_speaker == pytest.approx(job.cfg_scale_speaker)
+    assert request.style == job.style
     assert request.seed == job.seed
     assert request.duration_scale == pytest.approx(job.duration_scale)
     assert request.num_candidates == job.num_candidates

@@ -14,9 +14,11 @@ from irodori_tts_infra.client.errors import (
     ClientUnavailableError,
 )
 from irodori_tts_infra.client.sync import SyncIrodoriClient
+from irodori_tts_infra.config import ClientSettings
 from irodori_tts_infra.contracts import (
     BatchSynthesisRequest,
     BatchSynthesisResult,
+    CapabilitiesResponse,
     ErrorPayload,
     HealthResponse,
     StreamChunkHeader,
@@ -24,6 +26,7 @@ from irodori_tts_infra.contracts import (
     SynthesisRequest,
     SynthesisResult,
     SynthesisSegment,
+    VoiceCapability,
 )
 
 if TYPE_CHECKING:
@@ -90,10 +93,28 @@ def test_health_returns_contract_from_get_health() -> None:
     assert _client(httpx.MockTransport(handler)).health() == health
 
 
-def test_synthesize_posts_request_and_returns_result() -> None:
-    synthesis_request = SynthesisRequest(
-        text="こんにちは", ref_embed="speakers/narrator.speaker.safetensors"
+@pytest.mark.parametrize("count", [0, 3])
+def test_capabilities_returns_strict_contract_from_get_capabilities(count: int) -> None:
+    capabilities = CapabilitiesResponse(
+        generation="fixture-generation",
+        ready=True,
+        readiness="ready",
+        voices=tuple(
+            VoiceCapability(id=f"fixture-{index}", label=f"Fixture {index}")
+            for index in range(count)
+        ),
     )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/capabilities"
+        return _json_response(capabilities)
+
+    assert _client(httpx.MockTransport(handler)).capabilities() == capabilities
+
+
+def test_synthesize_posts_request_and_returns_result() -> None:
+    synthesis_request = SynthesisRequest(text="こんにちは")
     synthesis_result = SynthesisResult(
         segment_index=0,
         wav_bytes=b"RIFF-single",
@@ -115,12 +136,10 @@ def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> None:
             SynthesisSegment(
                 segment_index=0,
                 text="地の文です。",
-                ref_embed="speakers/narrator.speaker.safetensors",
             ),
             SynthesisSegment(
                 segment_index=1,
                 text="台詞です。",
-                ref_embed="speakers/narrator.speaker.safetensors",
             ),
         ]
     )
@@ -142,9 +161,7 @@ def test_synthesize_batch_posts_segments_and_returns_ordered_results() -> None:
 
 
 def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks() -> None:
-    synthesis_request = SynthesisRequest(
-        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="長い本文です。")
     payloads = [b"RI", b"FF", b"-wav"]
     paths: list[str] = []
 
@@ -163,9 +180,7 @@ def test_synthesize_stream_reconstructs_byte_exact_payload_across_three_chunks()
 
 
 def test_synthesize_stream_yields_payload_before_response_completes() -> None:
-    synthesis_request = SynthesisRequest(
-        text="長い本文です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="長い本文です。")
     first_frame = (
         StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
         + StreamChunkHeader(segment_index=0, byte_length=2, final=False).to_bytes()
@@ -187,9 +202,7 @@ def test_synthesize_stream_yields_payload_before_response_completes() -> None:
 
 
 def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> None:
-    synthesis_request = SynthesisRequest(
-        text="境界値です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="境界値です。")
     payloads = [b"", b"abcd"]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -237,9 +250,7 @@ def test_synthesize_stream_accepts_missing_handshake_and_boundary_lengths() -> N
     ],
 )
 def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(
-        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="異常系です。")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -271,9 +282,7 @@ def test_header_kind_ignores_non_string_kind(header: bytes) -> None:
     ],
 )
 def test_synthesize_stream_rejects_malformed_frames(stream: bytes, match: str) -> None:
-    synthesis_request = SynthesisRequest(
-        text="壊れたフレームです。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="壊れたフレームです。")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -295,9 +304,7 @@ def test_synthesize_stream_error_responses_map_to_typed_client_errors(
     status_code: int,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(
-        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="異常系です。")
     error_payload = ErrorPayload(
         code="server_busy",
         message="server cannot accept work",
@@ -329,9 +336,7 @@ def test_synthesize_stream_open_failures_map_to_typed_client_errors(
     message: str,
     expected_error: type[ClientError],
 ) -> None:
-    synthesis_request = SynthesisRequest(
-        text="異常系です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="異常系です。")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
@@ -415,7 +420,8 @@ def test_transport_error_maps_to_client_unavailable_error() -> None:
 
 def test_default_base_url_uses_client_settings() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url == httpx.URL("http://127.0.0.1:8923/health")
+        settings = ClientSettings()
+        assert request.url == httpx.URL(f"http://{settings.host}:{settings.port}/health")
         return _json_response(HealthResponse())
 
     assert SyncIrodoriClient(transport=httpx.MockTransport(handler)).health().status == "ok"
@@ -432,9 +438,7 @@ def test_sync_client_closes_owned_httpx_client() -> None:
 
 
 def test_sync_client_closes_owned_httpx_client_when_stream_health_fails() -> None:
-    synthesis_request = SynthesisRequest(
-        text="本文です。", ref_embed="speakers/narrator.speaker.safetensors"
-    )
+    synthesis_request = SynthesisRequest(text="本文です。")
     error_payload = ErrorPayload(code="server_busy", message="server cannot accept work")
     paths: list[str] = []
 

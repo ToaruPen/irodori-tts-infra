@@ -11,6 +11,7 @@ from typing_extensions import override
 
 from irodori_tts_infra.client import cli
 from irodori_tts_infra.client.errors import ClientUnavailableError
+from irodori_tts_infra.config import ClientSettings
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -139,9 +140,9 @@ def test_read_aloud_synthesizes_and_plays_segments_in_speaker_order(
     assert client.closed is True
     assert [request.text for request in client.requests] == ["地の文です。", "こんにちは"]
     assert client.requests[0].speaker is None
-    assert client.requests[0].ref_embed is None
+    assert not hasattr(client.requests[0], "ref_embed")
     assert client.requests[1].speaker == "チヅル"
-    assert client.requests[1].ref_embed is None
+    assert not hasattr(client.requests[1], "ref_embed")
 
 
 def test_read_aloud_splits_long_segments_before_synthesis(
@@ -371,10 +372,8 @@ def test_read_aloud_uses_speaker_manifest_without_characters_markdown(
 
     assert result.exit_code == 0, result.output
     requests = FakeSyncIrodoriClient.instances[0].requests
-    assert [(request.speaker, request.ref_embed) for request in requests] == [
-        (None, None),
-        ("ミカ", None),
-    ]
+    assert [request.speaker for request in requests] == [None, "ミカ"]
+    assert all(not hasattr(request, "ref_embed") for request in requests)
     assert (save_dir / "segment-0000.wav").read_bytes() == b"narration-wav"
     assert (save_dir / "segment-0001.wav").read_bytes() == b"dialogue-wav"
 
@@ -408,10 +407,8 @@ def test_read_aloud_sends_speaker_without_local_manifest(
 
     assert result.exit_code == 0, result.output
     requests = FakeSyncIrodoriClient.instances[0].requests
-    assert [(request.speaker, request.ref_embed) for request in requests] == [
-        (None, None),
-        ("ミカ", None),
-    ]
+    assert [request.speaker for request in requests] == [None, "ミカ"]
+    assert all(not hasattr(request, "ref_embed") for request in requests)
 
 
 def test_read_aloud_does_not_reject_speaker_missing_from_local_manifest(
@@ -435,7 +432,7 @@ def test_read_aloud_does_not_reject_speaker_missing_from_local_manifest(
     assert result.exit_code == 0, result.output
     request = FakeSyncIrodoriClient.instances[0].requests[0]
     assert request.speaker == "リナ"
-    assert request.ref_embed is None
+    assert not hasattr(request, "ref_embed")
 
 
 def test_read_aloud_remote_host_override_builds_client_base_url(
@@ -461,8 +458,9 @@ def test_read_aloud_remote_host_override_builds_client_base_url(
     )
 
     assert result.exit_code == 0, result.output
-    assert FakeSyncIrodoriClient.instances[0].base_url == "http://100.112.161.83:8923"
-    assert FakeSyncIrodoriClient.instances[0].requests[0].ref_embed is None
+    default_port = ClientSettings.model_fields["port"].default
+    assert FakeSyncIrodoriClient.instances[0].base_url == f"http://100.112.161.83:{default_port}"
+    assert not hasattr(FakeSyncIrodoriClient.instances[0].requests[0], "ref_embed")
 
 
 def test_read_aloud_remote_host_with_explicit_port_skips_default_port(

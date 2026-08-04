@@ -88,7 +88,59 @@ def _bootstrap_script(
         f"uv sync --all-extras --locked --python {runtime_python}; "
         f"uv pip install --python {runtime_python} '.[all]'; "
         f"uv pip install --python {runtime_python} {_ps_quote(irodori_requirement)}; "
-        f"uv pip check --python {runtime_python}"
+        f"uv pip check --python {runtime_python}; "
+        f"{_runtime_compatibility_check_script(runtime_python)}"
+    )
+
+
+def _runtime_compatibility_check_script(runtime_python: str) -> str:
+    return (
+        "$compatibilityPath = Join-Path "
+        "(Get-Location) '.runtime-compatibility-check.py'; "
+        "try { "
+        "$compatibilityCode = @'\n"
+        f"{_runtime_compatibility_code()}"
+        "'@; "
+        "Set-Content -LiteralPath $compatibilityPath "
+        "-Value $compatibilityCode -Encoding UTF8; "
+        f"& {runtime_python} $compatibilityPath; "
+        "if ($LASTEXITCODE -ne 0) { "
+        "throw 'Irodori-TTS runtime is incompatible with VoiceDesign contract' } "
+        "} finally { "
+        "Remove-Item -LiteralPath $compatibilityPath "
+        "-Force -ErrorAction SilentlyContinue }"
+    )
+
+
+def _runtime_compatibility_code() -> str:
+    return (
+        "import inspect\n"
+        "\n"
+        "from irodori_tts.config import ModelConfig\n"
+        "from irodori_tts.inference_runtime import SamplingRequest\n"
+        "\n"
+        "required_sampling_fields = {\n"
+        '    "caption",\n'
+        '    "ref_embed",\n'
+        '    "cfg_scale_caption",\n'
+        '    "cfg_scale_speaker",\n'
+        '    "cfg_guidance_mode",\n'
+        "}\n"
+        "required_model_fields = {\n"
+        '    "use_caption_condition",\n'
+        '    "use_speaker_condition",\n'
+        "}\n"
+        "sampling_fields = set(inspect.signature(SamplingRequest).parameters)\n"
+        "model_fields = set(inspect.signature(ModelConfig).parameters)\n"
+        "missing = sorted(\n"
+        "    required_sampling_fields.difference(sampling_fields)\n"
+        "    | required_model_fields.difference(model_fields)\n"
+        ")\n"
+        "if missing:\n"
+        "    raise RuntimeError(\n"
+        '        "Irodori-TTS runtime is incompatible with VoiceDesign contract; "\n'
+        "        f\"missing fields: {', '.join(missing)}\"\n"
+        "    )\n"
     )
 
 

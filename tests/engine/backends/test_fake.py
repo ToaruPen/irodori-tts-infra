@@ -6,9 +6,8 @@ from queue import Queue
 
 import pytest
 
-from irodori_tts_infra.contracts.synthesis import SynthesisRequest
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer, FakeSynthResponse
-from irodori_tts_infra.engine.models import SynthesizedAudio
+from irodori_tts_infra.engine.models import ResolvedSynthesisRequest, SynthesizedAudio
 
 pytestmark = pytest.mark.unit
 
@@ -17,8 +16,11 @@ DELAY_SECONDS = 0.05
 THREAD_COUNT = 10
 
 
-def make_request(text: str = "こんにちは") -> SynthesisRequest:
-    return SynthesisRequest(text=text, ref_embed="speakers/narrator.speaker.safetensors")
+def make_request(text: str = "こんにちは") -> ResolvedSynthesisRequest:
+    return ResolvedSynthesisRequest(
+        text=text,
+        ref_embed="speakers/narrator.speaker.safetensors",
+    )
 
 
 def test_default_response_returns_default_audio() -> None:

@@ -10,6 +10,7 @@ from starlette import status
 from irodori_tts_infra.contracts import (
     MAX_CHUNK_SIZE_BYTES,
     BatchSynthesisResult,
+    ErrorPayload,
     StreamChunkHeader,
     StreamHandshakeHeader,
     SynthesisResult,
@@ -24,8 +25,9 @@ if TYPE_CHECKING:
 
     from httpx import Response
 
-    from irodori_tts_infra.contracts import SynthesisRequest
+    from irodori_tts_infra.engine.models import ResolvedSynthesisRequest
     from irodori_tts_infra.engine.pipeline import SynthesisPipeline
+    from irodori_tts_infra.voice_bank import VoiceProfile
 
 pytestmark = pytest.mark.unit
 
@@ -40,7 +42,7 @@ class BlockingSynthesizer:
         self.entered = threading.Event()
         self.release = threading.Event()
 
-    def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
+    def synthesize(self, request: ResolvedSynthesisRequest) -> SynthesizedAudio:
         del request
         self.entered.set()
         assert _wait_for_event(self.release)
@@ -97,6 +99,75 @@ def test_synthesize_resolves_speaker_on_server_voice_profile(
     assert synthesizer.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
 
 
+def test_synthesize_resolves_versioned_voice_from_runtime_catalog(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    catalog_profile_factory: Callable[[int], VoiceProfile],
+) -> None:
+    synthesizer = FakeSynthesizer()
+    profile = catalog_profile_factory(3)
+    selected = profile.catalog[-1]
+    app = create_app(
+        pipeline_factory(
+            synthesizer,
+            config=PipelineConfig(generation="fixture-generation"),
+            voice_profile=profile,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={
+                "text": "本文",
+                "voice_id": selected.id,
+                "if_generation": "fixture-generation",
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert synthesizer.calls[0].ref_embed == str(selected.speaker.ref_embed)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("fixture-missing", "fixture-generation", 404, "voice_not_found"),
+        ("fixture-voice-0", "stale-generation", 409, "runtime_generation_mismatch"),
+    ],
+)
+def test_synthesize_maps_versioned_voice_failures_to_stable_errors(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    catalog_profile_factory: Callable[[int], VoiceProfile],
+    case: tuple[str, str, int, str],
+) -> None:
+    voice_id, generation, expected_status, expected_code = case
+    synthesizer = FakeSynthesizer()
+    profile = catalog_profile_factory(2)
+    app = create_app(
+        pipeline_factory(
+            synthesizer,
+            config=PipelineConfig(generation="fixture-generation"),
+            voice_profile=profile,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={
+                "text": "本文",
+                "voice_id": voice_id,
+                "if_generation": generation,
+            },
+        )
+
+    assert response.status_code == expected_status
+    error = ErrorPayload.model_validate_json(response.text)
+    assert error.code == expected_code
+    assert "speakers/" not in error.message
+    assert synthesizer.calls == []
+
+
 def test_synthesize_rejects_public_ref_embed(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
@@ -109,7 +180,7 @@ def test_synthesize_rejects_public_ref_embed(
         )
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
-    assert response.json()["detail"] == "ref_embed is resolved server-side; send speaker instead"
+    _assert_validation_error_mentions(response, "ref_embed", "extra inputs are not permitted")
 
 
 @pytest.mark.parametrize(
@@ -156,18 +227,17 @@ def test_batch_and_stream_reject_public_ref_embed(
         response = client.post(endpoint, json=payload)
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
-    assert response.json()["detail"] == "ref_embed is resolved server-side; send speaker instead"
+    _assert_validation_error_mentions(response, "ref_embed", "extra inputs are not permitted")
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("caption", "old VoiceDesign caption"),
-        ("cfg_scale_caption", 3.0),
         ("no_ref", False),
     ],
 )
-def test_synthesize_rejects_removed_voicedesign_fields(
+def test_synthesize_rejects_private_voicedesign_fields(
     pipeline_factory: Callable[..., SynthesisPipeline],
     field: str,
     value: object,
@@ -182,6 +252,27 @@ def test_synthesize_rejects_removed_voicedesign_fields(
 
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
+
+
+def test_synthesize_accepts_style_and_caption_cfg(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    synthesizer = FakeSynthesizer()
+    app = create_app(pipeline_factory(synthesizer))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={
+                "text": "本文",
+                "style": "calm",
+                "cfg_scale_caption": 2.5,
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert synthesizer.calls[0].style == "calm"
+    assert synthesizer.calls[0].cfg_scale_caption == pytest.approx(2.5)
 
 
 def test_synthesize_returns_200_for_empty_wav_bytes(
@@ -252,7 +343,9 @@ def test_synthesize_maps_backend_unavailable_to_503(
         )
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert response.json()["code"] == "backend_unavailable"
+    error = ErrorPayload.model_validate_json(response.text)
+    assert error.code == "backend_unavailable"
+    assert error.message == "Synthesis backend is unavailable"
 
 
 def test_synthesize_maps_backpressure_to_429(
@@ -407,7 +500,9 @@ def test_synthesize_batch_maps_backend_unavailable_to_503(
         )
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert response.json()["code"] == "backend_unavailable"
+    error = ErrorPayload.model_validate_json(response.text)
+    assert error.code == "backend_unavailable"
+    assert error.message == "Synthesis backend is unavailable"
 
 
 def test_synthesize_batch_maps_backpressure_to_429(
@@ -439,7 +534,9 @@ def test_synthesize_batch_maps_backpressure_to_429(
         )
 
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
-    assert response.json()["code"] == "backpressure"
+    error = ErrorPayload.model_validate_json(response.text)
+    assert error.code == "backpressure"
+    assert error.message == "Synthesis backend is busy"
 
 
 def test_synthesize_batch_rejects_unordered_segment_indices(
@@ -494,11 +591,10 @@ def test_synthesize_batch_validation_error_returns_422(
     ("field", "value"),
     [
         ("caption", "old VoiceDesign caption"),
-        ("cfg_scale_caption", 3.0),
         ("no_ref", False),
     ],
 )
-def test_synthesize_batch_rejects_removed_voicedesign_fields(
+def test_synthesize_batch_rejects_private_voicedesign_fields(
     pipeline_factory: Callable[..., SynthesisPipeline],
     field: str,
     value: object,
@@ -523,20 +619,21 @@ def test_synthesize_batch_rejects_removed_voicedesign_fields(
     _assert_validation_error_mentions(response, field, "extra inputs are not permitted")
 
 
-def test_synthesize_returns_500_when_pipeline_missing(
+def test_synthesize_returns_stable_model_not_loaded_when_pipeline_missing(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:
     app = create_app(pipeline_factory())
-    app.state.pipeline = None
 
     with TestClient(app, raise_server_exceptions=False) as client:
+        app.state.pipeline = None
         response = client.post(
             "/synthesize",
             json={"text": "本文"},
         )
 
-    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert response.json() == {"detail": "Synthesis pipeline is not configured"}
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    error = ErrorPayload.model_validate_json(response.text)
+    assert error.code == "model_not_loaded"
 
 
 def test_synthesize_stream_preserves_bytes_and_segment_order(
@@ -652,11 +749,10 @@ def test_synthesize_stream_accepts_single_request(
     ("field", "value"),
     [
         ("caption", "old VoiceDesign caption"),
-        ("cfg_scale_caption", 3.0),
         ("no_ref", False),
     ],
 )
-def test_synthesize_stream_rejects_removed_voicedesign_fields(
+def test_synthesize_stream_rejects_private_voicedesign_fields(
     pipeline_factory: Callable[..., SynthesisPipeline],
     field: str,
     value: object,
@@ -784,6 +880,47 @@ def test_synthesize_stream_emits_terminal_on_backpressure(
     assert header.byte_length == 0
     assert header.final is True
     assert header.error_code == "backpressure"
+    assert payload == b""
+
+
+@pytest.mark.parametrize(
+    ("voice_id", "generation", "expected_error"),
+    [
+        ("fixture-missing", "fixture-generation", "voice_not_found"),
+        ("fixture-voice-0", "stale-generation", "runtime_generation_mismatch"),
+    ],
+)
+def test_synthesize_stream_frames_versioned_voice_errors(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+    catalog_profile_factory: Callable[[int], VoiceProfile],
+    voice_id: str,
+    generation: str,
+    expected_error: str,
+) -> None:
+    app = create_app(
+        pipeline_factory(
+            FakeSynthesizer(),
+            config=PipelineConfig(generation="fixture-generation"),
+            voice_profile=catalog_profile_factory(1),
+        )
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/synthesize_stream",
+            json={
+                "text": "本文",
+                "voice_id": voice_id,
+                "if_generation": generation,
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    _, chunks = _parse_stream(response.content)
+    assert len(chunks) == 1
+    header, payload = chunks[0]
+    assert header.final is True
+    assert header.error_code == expected_error
     assert payload == b""
 
 
