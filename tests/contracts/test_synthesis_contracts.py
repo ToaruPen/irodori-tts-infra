@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from irodori_tts_infra.contracts import (
     MAX_CHUNK_SIZE_BYTES,
     MAX_NUM_CANDIDATES,
+    MAX_NUM_STEPS,
     MAX_SEGMENT_INDEX,
     STREAM_HEADER_VERSION,
     BatchSynthesisRequest,
@@ -29,6 +30,7 @@ DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
 DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
+WIRE_TEST_CHUNK_BYTES = 4
 
 
 def test_synthesis_request_defaults_and_validation() -> None:
@@ -62,6 +64,8 @@ def test_synthesis_request_defaults_and_validation() -> None:
             text="こんにちは",
             num_candidates=MAX_NUM_CANDIDATES + 1,
         )
+    with pytest.raises(ValidationError, match="num_steps"):
+        SynthesisRequest(text="こんにちは", num_steps=MAX_NUM_STEPS + 1)
     with pytest.raises(ValidationError, match="style"):
         SynthesisRequest(text="こんにちは", style="dramatic")  # type: ignore[arg-type]
     with pytest.raises(ValidationError, match="cfg_scale_caption"):
@@ -410,6 +414,29 @@ def test_stream_handshake_header_roundtrip_and_kind_discriminator() -> None:
     assert handshake_json["kind"] == "handshake"
     assert "segment_index" not in handshake_json
     assert "byte_length" not in handshake_json
+
+
+def test_v4_stream_wire_version_uses_compact_v1_aliases() -> None:
+    assert STREAM_HEADER_VERSION == 1
+    handshake = StreamHandshakeHeader(max_chunk_size=1024).model_dump(mode="json", by_alias=True)
+    chunk = StreamChunkHeader(
+        segment_index=0,
+        byte_length=WIRE_TEST_CHUNK_BYTES,
+        final=True,
+    ).model_dump(
+        mode="json",
+        by_alias=True,
+    )
+
+    assert handshake == {"kind": "handshake", "v": 1, "max_chunk_size": 1024}
+    assert chunk["kind"] == "chunk"
+    assert chunk["v"] == 1
+    assert chunk["index"] == 0
+    assert chunk["nbytes"] == WIRE_TEST_CHUNK_BYTES
+    assert chunk["final"] is True
+    assert "header_version" not in chunk
+    assert "segment_index" not in chunk
+    assert "byte_length" not in chunk
 
 
 def test_stream_handshake_header_rejects_out_of_range_max_chunk_size() -> None:

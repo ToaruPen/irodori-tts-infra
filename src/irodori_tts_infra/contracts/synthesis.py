@@ -25,6 +25,7 @@ class _ContractModel(BaseModel):
 
 
 MAX_NUM_CANDIDATES = 4
+MAX_NUM_STEPS = 64
 IrodoriStyle = Literal["neutral", "calm", "cheerful", "clear"]
 PositiveFiniteFloat = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
 
@@ -45,7 +46,7 @@ class SynthesisRequest(_ContractModel):
     speaker: str | None = Field(default=None, min_length=1)
     voice_id: str | None = Field(default=None, min_length=1)
     if_generation: str | None = Field(default=None, min_length=1)
-    num_steps: int = Field(default=40, gt=0)
+    num_steps: int = Field(default=40, gt=0, le=MAX_NUM_STEPS)
     cfg_scale_text: PositiveFiniteFloat = 3.0
     cfg_scale_caption: PositiveFiniteFloat = 3.0
     cfg_scale_speaker: PositiveFiniteFloat = 5.0

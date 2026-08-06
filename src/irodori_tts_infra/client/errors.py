@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import ValidationError
@@ -38,6 +38,21 @@ class ClientUnavailableError(ClientError):
     pass
 
 
+StreamErrorCode = Literal[
+    "backend_unavailable",
+    "backpressure",
+    "voice_not_found",
+    "runtime_generation_mismatch",
+]
+
+_STREAM_ERROR_METADATA: dict[StreamErrorCode, tuple[int, str]] = {
+    "backend_unavailable": (503, "synthesis backend is unavailable"),
+    "backpressure": (429, "synthesis request was rejected by backpressure"),
+    "voice_not_found": (404, "requested voice was not found"),
+    "runtime_generation_mismatch": (409, "runtime generation does not match request"),
+}
+
+
 def build_timeout_error(exc: httpx.TimeoutException, *, endpoint: str) -> ClientTimeoutError:
     return ClientTimeoutError(
         str(exc),
@@ -52,6 +67,17 @@ def build_transport_error(exc: httpx.TransportError, *, endpoint: str) -> Client
         str(exc),
         code="transport_error",
         details={"error": str(exc)},
+        endpoint=endpoint,
+    )
+
+
+def build_stream_error(error_code: StreamErrorCode, *, endpoint: str) -> ClientError:
+    status_code, message = _STREAM_ERROR_METADATA[error_code]
+    error_type = _error_type_for_status(status_code)
+    return error_type(
+        message,
+        status_code=status_code,
+        code=error_code,
         endpoint=endpoint,
     )
 
