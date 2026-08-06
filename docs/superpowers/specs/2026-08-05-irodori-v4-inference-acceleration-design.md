@@ -1,6 +1,6 @@
 # Irodori-TTS v4 推論高速化設計
 
-**Status:** request sampling候補の客観評価完了、blind ABは未完、Windows/Linux compile・量子化候補は検証完了・不採用
+**Status:** request sampling評価・blind AB完了、mocoは12/swayを運用選択、Windows/Linux compile・量子化候補は検証完了・不採用
 **Date:** 2026-08-05
 
 ## 目的
@@ -182,10 +182,14 @@ similarityは0.818995、最小は0.779723で、baselineの平均0.820167から�
 件数0、baselineと`12 / sway`間のECAPA similarityは平均0.983961、最小0.936903だった。
 本文、voice metadata、generation、WAV、transcriptは集計へ残さず、一時生成物は削除した。
 
-以上から客観metric上のrequest-level最良候補を`12 steps / sway / neutral`とする。ただしblind
-ABが未完であるためproduction winnerには昇格せず、mocoの既定値とactive configは`24 / linear`
-を維持する。mocoはmodel artifactを知らず、明示的な試験時だけこの2個のsampling値をtyped
-requestとして送れる。rollback値も`24 / linear`である。
+以上から客観metric上のrequest-level最良候補を`12 steps / sway / neutral`とした。2026-08-06に
+同一packet内の12組をblindで確認し、ユーザー回答は全12組が同等、scoreは
+`no_detected_degradation`だった。明示承認後、mocoの既定値とactive configを`12 / sway`へ
+変更した。
+
+これは2026-08-06時点の運用選択であり、Irodori HTTP通信契約の固定値ではない。mocoは有効な
+`num_steps`と`t_schedule_mode`を設定からtyped requestへ転送でき、testは選択中profileの値を
+契約fixtureとして固定しない。sampling rollbackはmoco設定を`24 / linear`へ戻す。
 
 2026-08-05のbaseline測定時はstandard serviceが11,482 MiB / 12,282 MiBを使用していたため、
 別processによるcompileまたはquantization比較を実行しなかった。その後、明示承認された
@@ -329,4 +333,4 @@ training output、quantized checkpoint、benchmark winnerを自動promoteしな�
 - compileは定常推論を速めても、初回と可変shapeの再compileで体感を悪化させ得る。
 - quantizationはGPU kernel次第で速度が改善せず、話者同一性だけを落とし得る。
 - standard serviceのGPU占有中はcompile/quantization比較を安全に実行できない。
-- 自動metricは自然さを完全に表さないため、最終採用にはblind ABを残す。
+- 自動metricは自然さを完全に表さないため、最終採用はblind ABと明示承認を必要とした。
