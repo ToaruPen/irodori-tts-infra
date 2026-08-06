@@ -39,6 +39,8 @@ choosing a recipe. `uv` remains the package manager and command runner beneath i
 - `just test [ARGS]`: run default tests and forward pytest arguments.
 - `just check`: run the full local lint, format, type, dead-code, and test gate.
 - `just client [ARGS]` and `just deploy [ARGS]`: run the project CLIs.
+- `just v4-inference-benchmark [ARGS]`: compare v4 sampling profiles against the
+  active capability catalog without retaining text, voice metadata, or audio.
 - `just remote-python SCRIPT [ARGS]` and `just remote-audit ROUND`: use the pinned
   upstream Windows runtime for remote scripts and dataset audits.
 - `just speaker-{train-queue,speed-benchmark,apply-speed-selection,evaluation-queue,build-manifests,generate,analyze,metrics,evaluate,review-packet,staging-report}`:
