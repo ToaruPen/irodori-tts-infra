@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import gzip
 import zlib
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 import pytest
 from typing_extensions import override
 
-from irodori_tts_infra.client import async_ as async_client
-from irodori_tts_infra.client.async_ import AsyncIrodoriClient
+from irodori_tts_infra.client._stream import (  # noqa: PLC2701 - parser boundary tests
+    MAX_STREAM_HEADER_BYTES,
+)
+from irodori_tts_infra.client.async_ import (
+    AsyncIrodoriClient,
+    _read_bounded_response,  # noqa: PLC2701 - bounded reader unit test
+)
 from irodori_tts_infra.client.errors import (
     ClientBackpressureError,
     ClientError,
@@ -36,42 +41,27 @@ from irodori_tts_infra.engine.models import SynthesizedAudio
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.server.app import create_app
 from irodori_tts_infra.voice_bank import CharacterVoice, SpeakerEmbeddingProfile, VoiceProfile
+from tests.client.helpers import (
+    MAX_TEST_CHUNK_SIZE,
+    TERMINAL_STREAM_ERROR_CASES,
+    empty_raw_deflate_blocks,
+    gzip_member,
+    raw_deflate_with_zlib_header_collision,
+    terminal_error_framed,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator
 
     from pydantic import BaseModel
 
 pytestmark = pytest.mark.unit
 
 BASE_URL = "http://irodori.test"
-MAX_TEST_CHUNK_SIZE = 4
-MAX_TEST_HEADER_BYTES = 4_096
 MAX_ONE_BYTE_RESPONSE_ENCODED_BYTES = 65
 RAW_RESPONSE_TEST_CHUNK_BYTES = 64 * 1024
 LARGE_GZIP_EXTRA_BYTES = 65_500
 SERVER_ERROR_STATUS = 500
-TERMINAL_STREAM_ERROR_CASES = [
-    (
-        "backend_unavailable",
-        ClientUnavailableError,
-        503,
-        "synthesis backend is unavailable",
-    ),
-    (
-        "backpressure",
-        ClientBackpressureError,
-        429,
-        "synthesis request was rejected by backpressure",
-    ),
-    ("voice_not_found", ClientError, 404, "requested voice was not found"),
-    (
-        "runtime_generation_mismatch",
-        ClientError,
-        409,
-        "runtime generation does not match request",
-    ),
-]
 
 
 def _client(handler: httpx.MockTransport) -> AsyncIrodoriClient:
@@ -108,70 +98,12 @@ def _framed(
     return b"".join(frames)
 
 
-def _terminal_error_framed(
-    error_code: Literal[
-        "backend_unavailable",
-        "backpressure",
-        "voice_not_found",
-        "runtime_generation_mismatch",
-    ],
-) -> bytes:
-    return (
-        StreamHandshakeHeader(max_chunk_size=MAX_TEST_CHUNK_SIZE).to_bytes()
-        + StreamChunkHeader(
-            segment_index=0,
-            byte_length=0,
-            final=True,
-            error_code=error_code,
-        ).to_bytes()
-    )
-
-
-def _raw_deflate_with_zlib_header_collision(decoded: bytes) -> bytes:
-    first_block = decoded[:29]
-    final_block = decoded[29:]
-
-    def stored_block(header: int, payload: bytes) -> bytes:
-        length = len(payload)
-        return b"".join(
-            (
-                bytes([header]),
-                length.to_bytes(2, "little"),
-                (length ^ 0xFFFF).to_bytes(2, "little"),
-                payload,
-            )
-        )
-
-    encoded = stored_block(0x08, first_block) + stored_block(0x01, final_block)
-    assert encoded.startswith(b"\x08\x1d")
-    return encoded
-
-
-def _empty_raw_deflate_blocks(count: int) -> bytes:
-    assert count > 0
-    nonfinal = b"\x00\x00\x00\xff\xff"
-    final = b"\x01\x00\x00\xff\xff"
-    return nonfinal * (count - 1) + final
-
-
-def _gzip_member(payload: bytes = b"", *, extra: bytes = b"") -> bytes:
-    encoded = gzip.compress(payload)
-    if not extra:
-        return encoded
-    header = encoded[:3] + b"\x04" + encoded[4:10]
-    return header + len(extra).to_bytes(2, "little") + extra + encoded[10:]
-
-
 async def _read_bounded_response_for_test(
     response: httpx.Response,
     *,
     max_bytes: int,
 ) -> bytes:
-    reader = cast(
-        "Callable[..., Awaitable[bytes]]",
-        vars(async_client)["_read_bounded_response"],
-    )
-    return await reader(response, max_bytes=max_bytes, endpoint="/health")
+    return await _read_bounded_response(response, max_bytes=max_bytes, endpoint="/health")
 
 
 async def _collect(chunks: AsyncIterator[bytes]) -> list[bytes]:
@@ -364,7 +296,7 @@ async def test_nonstreaming_response_preserves_decoded_compressed_content() -> N
 async def test_nonstreaming_response_accepts_raw_deflate_with_zlib_header_collision() -> None:
     health = HealthResponse(status="ok", model_loaded=True)
     decoded = health.model_dump_json().encode()
-    encoded = _raw_deflate_with_zlib_header_collision(decoded)
+    encoded = raw_deflate_with_zlib_header_collision(decoded)
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -440,10 +372,10 @@ async def test_nonstreaming_response_incrementally_decodes_multiple_member_gzip(
     health = HealthResponse(status="ok", model_loaded=True)
     decoded = health.model_dump_json().encode()
     split = len(decoded) // 2
-    encoded = _gzip_member(
+    encoded = gzip_member(
         decoded[:split],
         extra=b"x" * LARGE_GZIP_EXTRA_BYTES,
-    ) + _gzip_member(decoded[split:])
+    ) + gzip_member(decoded[split:])
     assert len(encoded) > RAW_RESPONSE_TEST_CHUNK_BYTES
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -646,7 +578,7 @@ async def test_nonstreaming_compressed_decode_uses_bounded_output_chunks(
 
 @pytest.mark.asyncio
 async def test_nonstreaming_compressed_content_length_rejects_encoded_body_before_reading() -> None:
-    stream = _ChunkedAsyncByteStream([_empty_raw_deflate_blocks(14)])
+    stream = _ChunkedAsyncByteStream([empty_raw_deflate_blocks(14)])
     response = httpx.Response(
         200,
         headers={"content-encoding": "deflate", "content-length": "70"},
@@ -664,7 +596,7 @@ async def test_nonstreaming_compressed_content_length_rejects_encoded_body_befor
 
 @pytest.mark.asyncio
 async def test_nonstreaming_deflate_encoded_limit_accepts_exact_chunked_boundary() -> None:
-    encoded = _empty_raw_deflate_blocks(13)
+    encoded = empty_raw_deflate_blocks(13)
     response = httpx.Response(
         200,
         headers={"content-encoding": "deflate"},
@@ -677,7 +609,7 @@ async def test_nonstreaming_deflate_encoded_limit_accepts_exact_chunked_boundary
 
 @pytest.mark.asyncio
 async def test_nonstreaming_deflate_encoded_limit_rejects_chunked_empty_block_overflow() -> None:
-    encoded = _empty_raw_deflate_blocks(14)
+    encoded = empty_raw_deflate_blocks(14)
     response = httpx.Response(
         200,
         headers={"content-encoding": "deflate"},
@@ -694,7 +626,7 @@ async def test_nonstreaming_deflate_encoded_limit_rejects_chunked_empty_block_ov
 
 @pytest.mark.asyncio
 async def test_nonstreaming_multiple_member_gzip_accepts_exact_encoded_boundary() -> None:
-    encoded = _gzip_member() * 2 + _gzip_member(extra=b"abc")
+    encoded = gzip_member() * 2 + gzip_member(extra=b"abc")
     assert len(encoded) == MAX_ONE_BYTE_RESPONSE_ENCODED_BYTES
     response = httpx.Response(
         200,
@@ -708,11 +640,11 @@ async def test_nonstreaming_multiple_member_gzip_accepts_exact_encoded_boundary(
 
 @pytest.mark.asyncio
 async def test_nonstreaming_multiple_member_gzip_rejects_encoded_overflow() -> None:
-    encoded = _gzip_member() * 2 + _gzip_member(extra=b"abc")
+    encoded = gzip_member() * 2 + gzip_member(extra=b"abc")
     response = httpx.Response(
         200,
         headers={"content-encoding": "gzip"},
-        stream=_ChunkedAsyncByteStream([encoded, _gzip_member()]),
+        stream=_ChunkedAsyncByteStream([encoded, gzip_member()]),
         request=httpx.Request("GET", f"{BASE_URL}/health"),
     )
 
@@ -1044,7 +976,7 @@ async def test_synthesize_stream_raises_typed_terminal_frame_error(
     message: str,
 ) -> None:
     synthesis_request = SynthesisRequest(text="終端エラーです。")
-    stream = _CloseTrackingAsyncByteStream([_terminal_error_framed(error_code)])
+    stream = _CloseTrackingAsyncByteStream([terminal_error_framed(error_code)])
     yielded: list[bytes] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1212,8 +1144,8 @@ async def test_synthesize_stream_rejects_protocol_errors(stream: bytes, match: s
             + b'{"kind":"chunk","v":1,"index":0,"nbytes":4}\nab',
             "truncated",
         ),
-        (b"x" * (MAX_TEST_HEADER_BYTES + 1), "header exceeds"),
-        (b"x" * (MAX_TEST_HEADER_BYTES + 1) + b"\n", "header exceeds"),
+        (b"x" * (MAX_STREAM_HEADER_BYTES + 1), "header exceeds"),
+        (b"x" * (MAX_STREAM_HEADER_BYTES + 1) + b"\n", "header exceeds"),
     ],
 )
 @pytest.mark.asyncio

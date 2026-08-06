@@ -10,26 +10,20 @@ from irodori_tts_infra.client._response import (
     _STREAM_RESPONSE_ENCODING,
     DEFAULT_MAX_RESPONSE_BYTES,
     DEFAULT_MAX_STREAM_FRAMES,
-    _BoundedResponseDecoder,
+    BoundedResponseDecoder,
     _buffered_response,
     _iter_bounded_decoded_content,
     _validate_content_encoding,
     _validate_max_response_bytes,
     _validate_max_stream_frames,
 )
+from irodori_tts_infra.client._stream import StreamPayloadParser, _require_identity_stream
 from irodori_tts_infra.client.errors import (
     build_response_error,
     build_timeout_error,
     build_transport_error,
 )
-from irodori_tts_infra.client.sync import (
-    _accept_stream_item,
-    _default_base_url,
-    _json_body,
-    _next_stream_payload,
-    _require_identity_stream,
-    _validate_stream_completion,
-)
+from irodori_tts_infra.client.sync import _default_base_url, _json_body
 from irodori_tts_infra.contracts import (
     BatchSynthesisRequest,
     BatchSynthesisResult,
@@ -121,9 +115,9 @@ class AsyncIrodoriClient:
                 _require_identity_stream(response)
                 async for payload in _iter_stream_payloads(
                     response.aiter_bytes(chunk_size=health.max_chunk_size),
-                    health.max_chunk_size,
-                    self._max_response_bytes,
-                    self._max_stream_frames,
+                    health_max_chunk_size=health.max_chunk_size,
+                    max_response_bytes=self._max_response_bytes,
+                    max_stream_frames=self._max_stream_frames,
                 ):
                     yield payload
         except httpx.TimeoutException as exc:
@@ -172,7 +166,7 @@ async def _read_bounded_response(
             content.extend(decoded)
         return bytes(content)
 
-    decoder = _BoundedResponseDecoder(response, max_bytes=max_bytes, endpoint=endpoint)
+    decoder = BoundedResponseDecoder(response, max_bytes=max_bytes, endpoint=endpoint)
     async for raw in response.aiter_raw(chunk_size=_RAW_RESPONSE_CHUNK_BYTES):
         for decoded in decoder.decode(raw):
             content.extend(decoded)
@@ -183,83 +177,18 @@ async def _read_bounded_response(
 
 async def _iter_stream_payloads(
     chunks: AsyncIterator[bytes],
+    *,
     health_max_chunk_size: int,
     max_response_bytes: int,
     max_stream_frames: int,
 ) -> AsyncIterator[bytes]:
-    buffer = bytearray()
-    expected_index = 0
-    effective_max_chunk_size = health_max_chunk_size
-    handshake_seen = False
-    payload_seen = False
-    final_seen = False
-    payload_bytes_received = 0
-    frame_count = 0
-
+    parser = StreamPayloadParser(
+        health_max_chunk_size=health_max_chunk_size,
+        max_response_bytes=max_response_bytes,
+        max_stream_frames=max_stream_frames,
+    )
     async for chunk in chunks:
-        buffer.extend(chunk)
-        while True:
-            if not buffer:
-                break
-            payload = _next_stream_payload(
-                buffer,
-                health_max_chunk_size=health_max_chunk_size,
-                effective_max_chunk_size=effective_max_chunk_size,
-                handshake_seen=handshake_seen,
-                payload_seen=payload_seen,
-                final_seen=final_seen,
-                expected_index=expected_index,
-                stream_done=False,
-            )
-            if payload is None:
-                break
-            (
-                payload_item,
-                effective_max_chunk_size,
-                handshake_seen,
-                payload_seen,
-                final_seen,
-                expected_index,
-            ) = payload
-            if payload_item is not None:
-                payload_bytes, payload_bytes_received, frame_count = _accept_stream_item(
-                    payload_item,
-                    payload_bytes_received=payload_bytes_received,
-                    frame_count=frame_count,
-                    max_response_bytes=max_response_bytes,
-                    max_stream_frames=max_stream_frames,
-                )
-                yield payload_bytes
-
-    while buffer:
-        payload = _next_stream_payload(
-            buffer,
-            health_max_chunk_size=health_max_chunk_size,
-            effective_max_chunk_size=effective_max_chunk_size,
-            handshake_seen=handshake_seen,
-            payload_seen=payload_seen,
-            final_seen=final_seen,
-            expected_index=expected_index,
-            stream_done=True,
-        )
-        if payload is None:
-            break
-        (
-            payload_item,
-            effective_max_chunk_size,
-            handshake_seen,
-            payload_seen,
-            final_seen,
-            expected_index,
-        ) = payload
-        if payload_item is not None:
-            payload_bytes, payload_bytes_received, frame_count = _accept_stream_item(
-                payload_item,
-                payload_bytes_received=payload_bytes_received,
-                frame_count=frame_count,
-                max_response_bytes=max_response_bytes,
-                max_stream_frames=max_stream_frames,
-            )
-            yield payload_bytes
-
-    _validate_stream_completion(handshake_seen=handshake_seen, final_seen=final_seen)
+        for payload in parser.feed(chunk):
+            yield payload
+    for payload in parser.finish():
+        yield payload
