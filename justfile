@@ -86,6 +86,10 @@ check:
 client *args:
     uv run irodori-tts "$@"
 
+# Compare v4 inference profiles without retaining text, voice metadata, or audio.
+v4-inference-benchmark *args:
+    uv run python scripts/benchmark_v4_inference.py "$@"
+
 # Run the deployment CLI, forwarding all arguments.
 deploy *args:
     uv run irodori-tts-deploy "$@"
