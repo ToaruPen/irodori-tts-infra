@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from irodori_tts_infra.contracts import (
+    DEFAULT_NUM_STEPS,
     MAX_CHUNK_SIZE_BYTES,
     MAX_NUM_CANDIDATES,
     MAX_NUM_STEPS,
@@ -26,7 +27,6 @@ from irodori_tts_infra.contracts import (
 
 pytestmark = pytest.mark.unit
 
-DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
 DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
@@ -66,6 +66,9 @@ def test_synthesis_request_defaults_and_validation() -> None:
             text="こんにちは",
             num_candidates=MAX_NUM_CANDIDATES + 1,
         )
+    with pytest.raises(ValidationError, match="num_steps"):
+        SynthesisRequest(text="こんにちは", num_steps=0)
+    assert SynthesisRequest(text="こんにちは", num_steps=MAX_NUM_STEPS).num_steps == MAX_NUM_STEPS
     with pytest.raises(ValidationError, match="num_steps"):
         SynthesisRequest(text="こんにちは", num_steps=MAX_NUM_STEPS + 1)
     with pytest.raises(ValidationError, match="style"):
@@ -431,14 +434,15 @@ def test_v4_stream_wire_version_uses_compact_v1_aliases() -> None:
     )
 
     assert handshake == {"kind": "handshake", "v": 1, "max_chunk_size": 1024}
-    assert chunk["kind"] == "chunk"
-    assert chunk["v"] == 1
-    assert chunk["index"] == 0
-    assert chunk["nbytes"] == WIRE_TEST_CHUNK_BYTES
-    assert chunk["final"] is True
-    assert "header_version" not in chunk
-    assert "segment_index" not in chunk
-    assert "byte_length" not in chunk
+    assert chunk == {
+        "kind": "chunk",
+        "v": 1,
+        "index": 0,
+        "nbytes": WIRE_TEST_CHUNK_BYTES,
+        "final": True,
+        "elapsed": 0.0,
+        "error_code": None,
+    }
 
 
 def test_stream_handshake_header_rejects_out_of_range_max_chunk_size() -> None:
