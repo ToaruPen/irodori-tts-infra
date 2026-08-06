@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from irodori_tts_infra.contracts import ErrorPayload
+from irodori_tts_infra.contracts import ErrorPayload, StreamErrorCode
 
 
 class ClientError(Exception):
@@ -38,6 +38,14 @@ class ClientUnavailableError(ClientError):
     pass
 
 
+_STREAM_ERROR_METADATA: dict[StreamErrorCode, tuple[int, str]] = {
+    "backend_unavailable": (503, "synthesis backend is unavailable"),
+    "backpressure": (429, "synthesis request was rejected by backpressure"),
+    "voice_not_found": (404, "requested voice was not found"),
+    "runtime_generation_mismatch": (409, "runtime generation does not match request"),
+}
+
+
 def build_timeout_error(exc: httpx.TimeoutException, *, endpoint: str) -> ClientTimeoutError:
     return ClientTimeoutError(
         str(exc),
@@ -52,6 +60,24 @@ def build_transport_error(exc: httpx.TransportError, *, endpoint: str) -> Client
         str(exc),
         code="transport_error",
         details={"error": str(exc)},
+        endpoint=endpoint,
+    )
+
+
+def build_stream_error(error_code: StreamErrorCode, *, endpoint: str) -> ClientError:
+    metadata = _STREAM_ERROR_METADATA.get(error_code)
+    if metadata is None:
+        return ClientError(
+            "response protocol error: unsupported stream error code",
+            code="protocol_error",
+            endpoint=endpoint,
+        )
+    status_code, message = metadata
+    error_type = _error_type_for_status(status_code)
+    return error_type(
+        message,
+        status_code=status_code,
+        code=error_code,
         endpoint=endpoint,
     )
 

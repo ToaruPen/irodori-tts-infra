@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, TypeAlias
 
 from pydantic import (
     AliasChoices,
@@ -25,7 +25,15 @@ class _ContractModel(BaseModel):
 
 
 MAX_NUM_CANDIDATES = 4
+DEFAULT_NUM_STEPS = 40
+MAX_NUM_STEPS = 64
 IrodoriStyle = Literal["neutral", "calm", "cheerful", "clear"]
+StreamErrorCode: TypeAlias = Literal[
+    "backend_unavailable",
+    "backpressure",
+    "voice_not_found",
+    "runtime_generation_mismatch",
+]
 PositiveFiniteFloat = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
 
 _STYLE_CAPTIONS: dict[IrodoriStyle, str | None] = {
@@ -45,7 +53,7 @@ class SynthesisRequest(_ContractModel):
     speaker: str | None = Field(default=None, min_length=1)
     voice_id: str | None = Field(default=None, min_length=1)
     if_generation: str | None = Field(default=None, min_length=1)
-    num_steps: int = Field(default=40, gt=0)
+    num_steps: int = Field(default=DEFAULT_NUM_STEPS, gt=0, le=MAX_NUM_STEPS)
     cfg_scale_text: PositiveFiniteFloat = 3.0
     cfg_scale_caption: PositiveFiniteFloat = 3.0
     cfg_scale_speaker: PositiveFiniteFloat = 5.0
@@ -155,15 +163,7 @@ class StreamChunkHeader(_ContractModel):
         serialization_alias="elapsed",
         validation_alias=AliasChoices("elapsed_seconds", "elapsed"),
     )
-    error_code: (
-        Literal[
-            "backend_unavailable",
-            "backpressure",
-            "voice_not_found",
-            "runtime_generation_mismatch",
-        ]
-        | None
-    ) = None
+    error_code: StreamErrorCode | None = None
 
     @model_validator(mode="after")
     def _validate_terminal_error_frame(self) -> Self:
