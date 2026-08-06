@@ -106,7 +106,7 @@ class _DeflateCandidate:
         self._chunks.clear()
 
 
-class _DeflateResponseDecoder:
+class DeflateResponseDecoder:
     def __init__(self, *, max_bytes: int, endpoint: str) -> None:
         self._endpoint = endpoint
         self._zlib = _DeflateCandidate(wbits=zlib.MAX_WBITS, max_bytes=max_bytes)
@@ -169,7 +169,7 @@ class _DeflateResponseDecoder:
         other.discard()
 
 
-class _BoundedResponseDecoder:
+class BoundedResponseDecoder:
     def __init__(
         self,
         response: httpx.Response,
@@ -186,21 +186,23 @@ class _BoundedResponseDecoder:
             max_bytes if self._encoding == "identity" else _encoded_response_limit(max_bytes)
         )
         self._decoder: _Decompressor | None = None
-        self._deflate_decoder: _DeflateResponseDecoder | None = None
+        self._deflate_decoder: DeflateResponseDecoder | None = None
 
         content_length = response.headers.get("content-length")
         if content_length is not None:
-            try:
-                declared_bytes = int(content_length)
-            except ValueError:
-                declared_bytes = 0
-            if declared_bytes > self._max_encoded_bytes:
+            if not content_length.isascii() or not content_length.isdigit():
+                raise _invalid_content_length_error(endpoint)
+            normalized_length = content_length.lstrip("0") or "0"
+            encoded_limit = str(self._max_encoded_bytes)
+            if len(normalized_length) > len(encoded_limit) or (
+                len(normalized_length) == len(encoded_limit) and normalized_length > encoded_limit
+            ):
                 raise _response_too_large_error(endpoint)
 
         if self._encoding == "gzip":
             self._decoder = zlib.decompressobj(zlib.MAX_WBITS | 16)
         elif self._encoding == "deflate":
-            self._deflate_decoder = _DeflateResponseDecoder(
+            self._deflate_decoder = DeflateResponseDecoder(
                 max_bytes=max_bytes,
                 endpoint=endpoint,
             )
@@ -365,6 +367,14 @@ def _response_too_large_error(endpoint: str) -> ClientError:
 def _invalid_compressed_content_error(endpoint: str) -> ClientError:
     return ClientError(
         "response protocol error: invalid compressed content",
+        code="protocol_error",
+        endpoint=endpoint,
+    )
+
+
+def _invalid_content_length_error(endpoint: str) -> ClientError:
+    return ClientError(
+        "response protocol error: invalid content-length",
         code="protocol_error",
         endpoint=endpoint,
     )

@@ -10,6 +10,7 @@ from irodori_tts_infra.contracts.capabilities import (
 from irodori_tts_infra.contracts.errors import ErrorDetailValue, ErrorPayload
 from irodori_tts_infra.contracts.health import HealthResponse
 from irodori_tts_infra.contracts.synthesis import (
+    DEFAULT_NUM_STEPS,
     MAX_CHUNK_SIZE_BYTES,
     MAX_NUM_CANDIDATES,
     MAX_NUM_STEPS,
@@ -19,6 +20,7 @@ from irodori_tts_infra.contracts.synthesis import (
     BatchSynthesisResult,
     IrodoriStyle,
     StreamChunkHeader,
+    StreamErrorCode,
     StreamHandshakeHeader,
     SynthesisRequest,
     SynthesisResult,
@@ -28,6 +30,7 @@ from irodori_tts_infra.contracts.synthesis import (
 from irodori_tts_infra.contracts.voices import VoiceCapability, VoiceProfileResponse
 
 __all__ = [
+    "DEFAULT_NUM_STEPS",
     "MAX_CHUNK_SIZE_BYTES",
     "MAX_NUM_CANDIDATES",
     "MAX_NUM_STEPS",
@@ -45,6 +48,7 @@ __all__ = [
     "IrodoriStyle",
     "Readiness",
     "StreamChunkHeader",
+    "StreamErrorCode",
     "StreamHandshakeHeader",
     "SynthesisRequest",
     "SynthesisResult",

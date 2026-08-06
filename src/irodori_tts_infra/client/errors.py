@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
 
-from irodori_tts_infra.contracts import ErrorPayload
+from irodori_tts_infra.contracts import ErrorPayload, StreamErrorCode
 
 
 class ClientError(Exception):
@@ -38,13 +38,6 @@ class ClientUnavailableError(ClientError):
     pass
 
 
-StreamErrorCode = Literal[
-    "backend_unavailable",
-    "backpressure",
-    "voice_not_found",
-    "runtime_generation_mismatch",
-]
-
 _STREAM_ERROR_METADATA: dict[StreamErrorCode, tuple[int, str]] = {
     "backend_unavailable": (503, "synthesis backend is unavailable"),
     "backpressure": (429, "synthesis request was rejected by backpressure"),
@@ -72,7 +65,14 @@ def build_transport_error(exc: httpx.TransportError, *, endpoint: str) -> Client
 
 
 def build_stream_error(error_code: StreamErrorCode, *, endpoint: str) -> ClientError:
-    status_code, message = _STREAM_ERROR_METADATA[error_code]
+    metadata = _STREAM_ERROR_METADATA.get(error_code)
+    if metadata is None:
+        return ClientError(
+            "response protocol error: unsupported stream error code",
+            code="protocol_error",
+            endpoint=endpoint,
+        )
+    status_code, message = metadata
     error_type = _error_type_for_status(status_code)
     return error_type(
         message,
