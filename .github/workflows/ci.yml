@@ -52,7 +52,8 @@ jobs:
           set +e
           uv run vulture src/ --min-confidence 80 &
           vul_pid=$!
-          uv run deptry .
+          # Operational scripts target pinned remote/dev runtimes; audit the package boundary.
+          uv run deptry src/
           dep_rc=$?
           wait "$vul_pid"
           vul_rc=$?

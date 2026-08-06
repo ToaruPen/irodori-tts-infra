@@ -51,6 +51,8 @@ def test_synthesis_request_defaults_and_validation() -> None:
 
     with pytest.raises(ValidationError, match="text"):
         SynthesisRequest(text="   ")
+    with pytest.raises(ValidationError, match="text"):
+        SynthesisRequest(text="こんにちは", speaker="   ")
 
     with pytest.raises(ValidationError, match="num_candidates"):
         SynthesisRequest(
