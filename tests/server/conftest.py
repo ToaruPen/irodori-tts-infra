@@ -6,7 +6,12 @@ import pytest
 
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
-from irodori_tts_infra.voice_bank import CharacterVoice, SpeakerEmbeddingProfile, VoiceProfile
+from irodori_tts_infra.voice_bank import (
+    CharacterVoice,
+    PortableVoice,
+    SpeakerEmbeddingProfile,
+    VoiceProfile,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,14 +36,34 @@ def server_profile() -> VoiceProfile:
     )
 
 
+def catalog_profile(count: int) -> VoiceProfile:
+    narrator = SpeakerEmbeddingProfile(
+        "speakers/fixture-narrator.speaker.safetensors",  # type: ignore[arg-type]
+    )
+    catalog = tuple(
+        PortableVoice(
+            id=f"fixture-voice-{index}",
+            label=f"Fixture voice {index}",
+            aliases=(f"fixture-alias-{index}",),
+            default=index == 0,
+            speaker=SpeakerEmbeddingProfile(
+                f"speakers/fixture-{index}.speaker.safetensors",  # type: ignore[arg-type]
+            ),
+        )
+        for index in range(count)
+    )
+    return VoiceProfile(characters={}, narrator=narrator, catalog=catalog)
+
+
 def make_pipeline(
     synthesizer: Synthesizer | None = None,
     *,
     config: PipelineConfig | None = None,
+    voice_profile: VoiceProfile | None = None,
 ) -> SynthesisPipeline:
     return SynthesisPipeline(
         synthesizer or FakeSynthesizer(),
-        server_profile(),
+        voice_profile or server_profile(),
         config=config,
     )
 
@@ -63,10 +88,16 @@ def fixture_pipeline_factory() -> Callable[..., SynthesisPipeline]:
     def build(
         synthesizer: Synthesizer | None = None,
         config: PipelineConfig | None = None,
+        voice_profile: VoiceProfile | None = None,
     ) -> SynthesisPipeline:
-        return make_pipeline(synthesizer, config=config)
+        return make_pipeline(synthesizer, config=config, voice_profile=voice_profile)
 
     return build
+
+
+@pytest.fixture(name="catalog_profile_factory")
+def fixture_catalog_profile_factory() -> Callable[[int], VoiceProfile]:
+    return catalog_profile
 
 
 @pytest.fixture(name="warmable_synthesizer")

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from irodori_tts_infra.voice_bank import (
+    PortableVoice,
     SpeakerEmbeddingProfile,
     find_characters_markdown,
     find_speaker_manifest,
@@ -15,6 +16,61 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
+
+
+def _catalog_manifest(
+    count: int, *, explicit_metadata: bool
+) -> tuple[str, list[dict[str, object]]]:
+    rows: list[dict[str, object]] = []
+    sections = [
+        "[narrator]",
+        'ref_embed = "speakers/fixture-narrator.speaker.safetensors"',
+    ]
+    if explicit_metadata:
+        sections.extend(
+            [
+                'voice_id = "fixture-voice-0"',
+                'label = "Fixture voice 0"',
+                'aliases = ["fixture-alias-0"]',
+                "default = true",
+            ]
+        )
+    rows.append(
+        {
+            "id": "fixture-voice-0" if explicit_metadata else "narrator",
+            "label": "Fixture voice 0" if explicit_metadata else "Narrator",
+            "aliases": ("fixture-alias-0",) if explicit_metadata else (),
+            "default": True,
+        }
+    )
+
+    for index in range(1, count + 1):
+        name = f"fixture-character-{index}"
+        sections.extend(
+            [
+                "",
+                f'[characters."{name}"]',
+                f'ref_embed = "speakers/fixture-{index}.speaker.safetensors"',
+            ]
+        )
+        if explicit_metadata:
+            sections.extend(
+                [
+                    f'voice_id = "fixture-voice-{index}"',
+                    f'label = "Fixture voice {index}"',
+                    f'aliases = ["fixture-alias-{index}"]',
+                    "default = false",
+                ]
+            )
+        rows.append(
+            {
+                "id": f"fixture-voice-{index}" if explicit_metadata else name,
+                "label": f"Fixture voice {index}" if explicit_metadata else name,
+                "aliases": (f"fixture-alias-{index}",) if explicit_metadata else (),
+                "default": False,
+            }
+        )
+    return "\n".join(sections) + "\n", rows
 
 
 def test_find_characters_markdown_finds_file_next_to_turn(tmp_path: Path) -> None:
@@ -103,6 +159,86 @@ def test_find_speaker_manifest_stops_at_chat_directory(tmp_path: Path) -> None:
 def test_load_voice_profile_requires_speaker_manifest() -> None:
     with pytest.raises(ValueError, match="speaker manifest is required"):
         load_voice_profile(None)
+
+
+@pytest.mark.parametrize("count", [0, 1, 4])
+@pytest.mark.parametrize("explicit_metadata", [False, True])
+def test_load_voice_profile_builds_catalog_from_runtime_manifest(
+    tmp_path: Path,
+    count: int,
+    explicit_metadata: bool,  # noqa: FBT001
+) -> None:
+    manifest_content, expected = _catalog_manifest(
+        count,
+        explicit_metadata=explicit_metadata,
+    )
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(manifest_content, encoding="utf-8")
+
+    profile = load_voice_profile(None, speaker_manifest=manifest)
+
+    assert len(profile.catalog) == len(expected)
+    for voice, expected_voice in zip(profile.catalog, expected, strict=True):
+        assert isinstance(voice, PortableVoice)
+        assert voice.id == expected_voice["id"]
+        assert voice.label == expected_voice["label"]
+        assert voice.aliases == expected_voice["aliases"]
+        assert voice.default is expected_voice["default"]
+        assert profile.resolve_voice_id(voice.id) is voice
+        for alias in voice.aliases:
+            assert profile.resolve_voice_id(alias) is voice
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        """
+voice_id = "shared-id"
+
+[characters."fixture-character"]
+ref_embed = "speakers/fixture-character.speaker.safetensors"
+voice_id = "shared-id"
+""",
+        """
+aliases = ["shared-alias"]
+
+[characters."fixture-character"]
+ref_embed = "speakers/fixture-character.speaker.safetensors"
+aliases = ["shared-alias"]
+""",
+        """
+voice_id = "fixture-narrator"
+aliases = ["fixture-character"]
+
+[characters."fixture-character"]
+ref_embed = "speakers/fixture-character.speaker.safetensors"
+voice_id = "fixture-character"
+""",
+        """
+default = true
+
+[characters."fixture-character"]
+ref_embed = "speakers/fixture-character.speaker.safetensors"
+default = true
+""",
+    ],
+)
+def test_load_voice_profile_rejects_ambiguous_catalog_metadata(
+    tmp_path: Path,
+    metadata: str,
+) -> None:
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        """
+[narrator]
+ref_embed = "speakers/fixture-narrator.speaker.safetensors"
+"""
+        + metadata,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="catalog"):
+        load_voice_profile(None, speaker_manifest=manifest)
 
 
 def test_load_voice_profile_loads_speaker_embeddings_relative_to_manifest(
@@ -470,6 +606,38 @@ ref_embed = "speakers/narrator.speaker.safetensors"
 ref_embed = ""
 """,
             r"characters\.ミカ\.ref_embed must not be blank",
+        ),
+        (
+            """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+voice_id = 123
+""",
+            r"narrator\.voice_id must be a string",
+        ),
+        (
+            """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+label = "   "
+""",
+            r"narrator\.label must not be blank",
+        ),
+        (
+            """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+aliases = "scalar"
+""",
+            r"narrator\.aliases must be an array",
+        ),
+        (
+            """
+[narrator]
+ref_embed = "speakers/narrator.speaker.safetensors"
+default = "true"
+""",
+            r"narrator\.default must be a boolean",
         ),
     ],
 )

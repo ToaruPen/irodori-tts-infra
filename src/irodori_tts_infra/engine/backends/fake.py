@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from irodori_tts_infra.engine.models import SynthesizedAudio
 
 if TYPE_CHECKING:
-    from irodori_tts_infra.contracts.synthesis import SynthesisRequest
+    from irodori_tts_infra.engine.models import ResolvedSynthesisRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,13 +26,13 @@ class FakeSynthesizer:
         default_sample_rate: int = 24_000,
         responses: list[FakeSynthResponse] | None = None,
     ) -> None:
-        self.calls: list[SynthesisRequest] = []
+        self.calls: list[ResolvedSynthesisRequest] = []
         self._default_wav = default_wav
         self._default_sample_rate = default_sample_rate
         self._responses = list(responses or [])
         self._lock = threading.Lock()
 
-    def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
+    def synthesize(self, request: ResolvedSynthesisRequest) -> SynthesizedAudio:
         with self._lock:
             self.calls.append(request)
             response = self._responses.pop(0) if self._responses else None

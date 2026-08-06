@@ -20,25 +20,26 @@ from irodori_tts_infra.contracts import (
     SynthesisResult,
     SynthesisSegment,
     VoiceProfileResponse,
+    style_caption,
 )
 
 pytestmark = pytest.mark.unit
 
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
+DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
 
 
 def test_synthesis_request_defaults_and_validation() -> None:
-    request = SynthesisRequest(
-        text="こんにちは",
-        ref_embed="speakers/narrator.speaker.safetensors",
-    )
+    request = SynthesisRequest(text="こんにちは")
 
-    assert request.ref_embed == "speakers/narrator.speaker.safetensors"
+    assert "ref_embed" not in SynthesisRequest.model_fields
     assert request.num_steps == DEFAULT_NUM_STEPS
     assert request.cfg_scale_text == pytest.approx(DEFAULT_CFG_SCALE_TEXT)
+    assert request.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
     assert request.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+    assert request.style == "neutral"
     assert request.seed is None
     assert request.duration_scale == pytest.approx(1.0)
     assert request.num_candidates == 1
@@ -46,34 +47,129 @@ def test_synthesis_request_defaults_and_validation() -> None:
     assert request.sway_coeff == pytest.approx(-1.0)
 
     with pytest.raises(ValidationError, match="text"):
-        SynthesisRequest(text="", ref_embed="speakers/narrator.speaker.safetensors")
+        SynthesisRequest(text="")
 
-    with pytest.raises(ValidationError, match="ref_embed"):
-        SynthesisRequest(text="こんにちは", ref_embed="   ")
+    with pytest.raises(ValidationError, match="text"):
+        SynthesisRequest(text="   ")
+    with pytest.raises(ValidationError, match="text"):
+        SynthesisRequest(text="こんにちは", speaker="   ")
 
     with pytest.raises(ValidationError, match="num_candidates"):
         SynthesisRequest(
             text="こんにちは",
-            ref_embed="speakers/narrator.speaker.safetensors",
             num_candidates=0,
         )
     with pytest.raises(ValidationError, match="num_candidates"):
         SynthesisRequest(
             text="こんにちは",
-            ref_embed="speakers/narrator.speaker.safetensors",
             num_candidates=MAX_NUM_CANDIDATES + 1,
         )
+    with pytest.raises(ValidationError, match="style"):
+        SynthesisRequest(text="こんにちは", style="dramatic")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="cfg_scale_caption"):
+        SynthesisRequest(text="こんにちは", cfg_scale_caption=0)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "cfg_scale_text",
+        "cfg_scale_caption",
+        "cfg_scale_speaker",
+        "duration_scale",
+        "sway_coeff",
+    ],
+)
+def test_synthesis_request_rejects_non_finite_sampling_values(field: str) -> None:
+    payload = f'{{"text":"こんにちは","{field}":1e309}}'
+
+    with pytest.raises(ValidationError, match=field):
+        SynthesisRequest.model_validate_json(payload)
+
+
+@pytest.mark.parametrize(
+    ("style", "expected"),
+    [
+        ("neutral", None),
+        ("calm", "穏やかで優しい女性の声で、自然に話す。"),
+        ("cheerful", "明るく親しみやすい女性の声で、自然に話す。"),
+        ("clear", "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。"),
+    ],
+)
+def test_style_caption_maps_public_style_to_fixed_caption(
+    style: str,
+    expected: str | None,
+) -> None:
+    assert style_caption(style) == expected  # type: ignore[arg-type]
 
 
 def test_synthesis_request_normalizes_optional_identifiers() -> None:
     request = SynthesisRequest(
         text="こんにちは",
         speaker="  ミカ  ",
-        ref_embed="  speakers/mika.speaker.safetensors  ",
     )
 
     assert request.speaker == "ミカ"
-    assert request.ref_embed == "speakers/mika.speaker.safetensors"
+
+
+def test_synthesis_request_accepts_legacy_speaker_or_versioned_voice_pair() -> None:
+    legacy = SynthesisRequest(text="こんにちは", speaker="  legacy-speaker  ")
+    versioned = SynthesisRequest(
+        text="こんにちは",
+        voice_id="  fixture-voice  ",
+        if_generation="  fixture-generation  ",
+    )
+
+    assert legacy.speaker == "legacy-speaker"
+    assert legacy.voice_id is None
+    assert legacy.if_generation is None
+    assert versioned.speaker is None
+    assert versioned.voice_id == "fixture-voice"
+    assert versioned.if_generation == "fixture-generation"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"voice_id": "fixture-voice"},
+        {"if_generation": "fixture-generation"},
+        {
+            "speaker": "legacy-speaker",
+            "voice_id": "fixture-voice",
+            "if_generation": "fixture-generation",
+        },
+    ],
+)
+def test_synthesis_request_rejects_incomplete_or_ambiguous_voice_selection(
+    payload: dict[str, str],
+) -> None:
+    with pytest.raises(ValidationError, match="voice_id"):
+        SynthesisRequest.model_validate({"text": "こんにちは", **payload})
+
+
+def test_synthesis_segment_applies_versioned_voice_validation() -> None:
+    with pytest.raises(ValidationError, match="voice_id"):
+        SynthesisSegment(segment_index=0, text="こんにちは", voice_id="fixture-voice")
+
+
+def test_synthesis_request_does_not_publish_freeform_caption() -> None:
+    with pytest.raises(ValidationError, match="caption"):
+        SynthesisRequest.model_validate(
+            {
+                "text": "こんにちは",
+                "caption": "arbitrary delivery instruction",
+            }
+        )
+
+
+def test_synthesis_request_does_not_publish_internal_ref_embed() -> None:
+    with pytest.raises(ValidationError, match="ref_embed"):
+        SynthesisRequest.model_validate(
+            {
+                "text": "こんにちは",
+                "ref_embed": "speakers/client-local.speaker.safetensors",
+            }
+        )
 
 
 def test_contracts_round_trip_through_json() -> None:
@@ -82,12 +178,10 @@ def test_contracts_round_trip_through_json() -> None:
             SynthesisSegment(
                 segment_index=0,
                 text="地の文です。",
-                ref_embed="speakers/narrator.speaker.safetensors",
             ),
             SynthesisSegment(
                 segment_index=1,
                 text="台詞です。",
-                ref_embed="speakers/mika.speaker.safetensors",
             ),
         ],
     )

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
-from irodori_tts_infra.config import ServerSettings
+from irodori_tts_infra.config import IrodoriRuntimeSettings, ServerSettings
 from irodori_tts_infra.deploy import cli
 from irodori_tts_infra.deploy.remote import _common as remote_common  # noqa: PLC2701
 from irodori_tts_infra.deploy.remote import bootstrap, service, sync, voice_bank
@@ -162,7 +162,7 @@ def test_sync_falls_back_to_scp_when_remote_rsync_is_unavailable(
         commands.append((list(command), check))
         if command[0] == "rsync":
             raise subprocess.CalledProcessError(
-                12,
+                1,
                 list(command),
                 "",
                 "bash: rsync: command not found",
@@ -178,6 +178,38 @@ def test_sync_falls_back_to_scp_when_remote_rsync_is_unavailable(
     assert "New-Item" in remote_command(commands[1][0])
     assert commands[2][0][0] == "scp"
     assert commands[2][0][-1] == "gpu:C:/irodori/"
+
+
+def test_sync_falls_back_when_windows_missing_rsync_message_is_mojibake(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    make_project(tmp_path)
+    monkeypatch.setattr(
+        "irodori_tts_infra.deploy.remote.sync.shutil.which",
+        lambda name: "/usr/bin/rsync" if name == "rsync" else None,
+    )
+    commands: list[tuple[list[str], bool]] = []
+
+    def fake_run(command: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        commands.append((list(command), check))
+        if command[0] == "rsync":
+            raise subprocess.CalledProcessError(
+                1,
+                list(command),
+                "",
+                (
+                    "rsync : �p�� 'rsync' �́A�R�}���h���b�g\n"
+                    "rsync(12496): error: unexpected end of file"
+                ),
+            )
+        return subprocess.CompletedProcess(list(command), 0, "", "")
+
+    monkeypatch.setattr(sync, "_run", fake_run)
+
+    sync.sync_project(remote_host="gpu", remote_dir="C:/irodori", repo_root=tmp_path)
+
+    assert [command[0][0] for command in commands] == ["rsync", "ssh", "scp"]
 
 
 def test_sync_reraises_non_unavailable_rsync_failures(
@@ -302,6 +334,19 @@ def test_bootstrap_creates_remote_dir_then_runtime_venv(
         "uv pip check --python $(Join-Path (Get-Location) '.runtime-venv/Scripts/python.exe')"
     )
     assert pip_check in bootstrap_script
+    assert "SamplingRequest" in bootstrap_script
+    assert "ModelConfig" in bootstrap_script
+    assert "required_sampling_fields" in bootstrap_script
+    assert "required_model_fields" in bootstrap_script
+    assert "Irodori-TTS runtime is incompatible with VoiceDesign contract" in bootstrap_script
+    assert ".runtime-compatibility-check.py" in bootstrap_script
+    assert "-c $compatibilityCode" not in bootstrap_script
+
+
+def test_bootstrap_runtime_compatibility_probe_is_valid_python() -> None:
+    code = bootstrap._runtime_compatibility_code()  # noqa: SLF001
+
+    compile(code, "<runtime-compatibility-check>", "exec")
 
 
 def test_bootstrap_file_url_percent_encodes_path_component() -> None:
@@ -341,11 +386,19 @@ def test_start_service_uses_uvicorn_and_pid_file(
     script = remote_command(commands[0][0])
     assert "Join-Path (Get-Location) '.uvicorn.pid'" in script
     assert "$line = $_.Trim([char]0xFEFF).Trim()" in script
-    assert "Start-Process -FilePath $runtimePython" in script
-    assert "'-m', 'uvicorn', 'irodori_tts_infra.server.main:app'" in script
+    assert "$launcherPid = & $runtimePython -c" in script
+    assert "$detachedBootstrap" in script
+    assert "$detachedPayload" in script
+    assert "Start-Process" not in script
+    launcher = service._DETACHED_LAUNCHER  # noqa: SLF001
+    assert "subprocess.CREATE_BREAKAWAY_FROM_JOB" in launcher
+    assert "subprocess.DETACHED_PROCESS" in launcher
+    assert "irodori_tts_infra.server.main:app" in launcher
     assert "$port = '9001'" in script
-    assert "'--host', $serverHost, '--port', $port" in script
-    assert "Set-Content -LiteralPath $pidFile -Value $process.Id" in script
+    assert "$serverHost $port $stdoutLog $stderrLog" in script
+    assert "ParentProcessId = $launcherPid" in script
+    assert "$servicePid = $serviceProcess.ProcessId" in script
+    assert "Set-Content -LiteralPath $pidFile -Value $servicePid" in script
 
 
 def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
@@ -364,10 +417,30 @@ def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
     assert f"{{ '{ServerSettings.model_fields['port'].default}' }}" in script
     assert "127.0.0.9" not in script
     assert "9999" not in script
-    assert "'--host', $serverHost, '--port', $port" in script
+    assert "$serverHost $port $stdoutLog $stderrLog" in script
 
 
-def test_start_service_loads_remote_env_before_start_process(
+def test_start_service_rejects_non_loopback_host_override() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        service.start_service(
+            remote_host="gpu",
+            remote_dir="C:/irodori",
+            server_host="0.0.0.0",  # noqa: S104 - rejected unsafe override
+        )
+
+
+def test_start_service_rejects_non_loopback_remote_env_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = record_commands(monkeypatch, service)
+
+    service.start_service(remote_host="gpu", remote_dir="C:/irodori")
+
+    script = remote_command(commands[0][0])
+    assert "server host must be loopback" in script
+
+
+def test_start_service_loads_remote_env_before_detached_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands = record_commands(monkeypatch, service)
@@ -377,14 +450,23 @@ def test_start_service_loads_remote_env_before_start_process(
     script = remote_command(commands[0][0])
     assert "Join-Path (Get-Location) '.env'" in script
     assert "[Environment]::SetEnvironmentVariable($name, $value, 'Process')" in script
-    assert script.index("[Environment]::SetEnvironmentVariable") < script.index("Start-Process")
+    assert script.index("[Environment]::SetEnvironmentVariable") < script.index(
+        "$launcherPid = &",
+    )
 
 
 def test_env_example_uses_current_server_settings_prefix() -> None:
     env_example = Path(".env.example").read_text(encoding="utf-8")
 
-    assert "IRODORI_TTS_SERVER_PORT=8923" in env_example
+    assert f"IRODORI_TTS_SERVER_PORT={ServerSettings.model_fields['port'].default}" in env_example
     assert "IRODORI_SERVER_PORT" not in env_example
+
+
+def test_env_example_keeps_runtime_generation_fail_closed() -> None:
+    env_example = Path(".env.example").read_text(encoding="utf-8")
+    sentinel = IrodoriRuntimeSettings.model_fields["public_generation"].default
+
+    assert f"IRODORI_TTS_RUNTIME_PUBLIC_GENERATION={sentinel}" in env_example
 
 
 def test_rvc_training_sop_is_marked_superseded() -> None:
@@ -395,23 +477,16 @@ def test_rvc_training_sop_is_marked_superseded() -> None:
     assert "voice_bank_rvc.toml" not in rvc_training
 
 
-def test_start_service_quotes_server_host_for_powershell(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    commands = record_commands(monkeypatch, service)
+def test_start_service_rejects_injected_server_host() -> None:
     server_host = "127.0.0.1'; Write-Output injected; '"
 
-    service.start_service(
-        remote_host="gpu",
-        remote_dir="C:/irodori",
-        server_host=server_host,
-        port=9001,
-    )
-
-    script = remote_command(commands[0][0])
-    assert "$serverHost = '127.0.0.1''; Write-Output injected; '''" in script
-    assert "$port = '9001'" in script
-    assert "'--host', $serverHost, '--port', $port" in script
+    with pytest.raises(ValueError, match="loopback"):
+        service.start_service(
+            remote_host="gpu",
+            remote_dir="C:/irodori",
+            server_host=server_host,
+            port=9001,
+        )
 
 
 def test_stop_service_reads_pid_stops_process_and_removes_pid_file(
@@ -422,8 +497,12 @@ def test_stop_service_reads_pid_stops_process_and_removes_pid_file(
     service.stop_service(remote_host="gpu", remote_dir="C:/irodori")
 
     script = remote_command(commands[0][0])
-    assert "Get-Content -LiteralPath $pidFile" in script
-    assert "Stop-Process -Id $pid -Force" in script
+    assert "$servicePid = Get-Content -LiteralPath $pidFile" in script
+    assert "Get-CimInstance Win32_Process" in script
+    assert "irodori_tts_infra.server.main:app" in script
+    assert "$serviceProcess.CommandLine -like" in script
+    assert "Stop-Process -Id $servicePid -Force" in script
+    assert "$pid =" not in script
     assert "Remove-Item -LiteralPath $pidFile" in script
 
 
@@ -437,7 +516,28 @@ def test_status_service_checks_pid_file_without_raising_for_stopped_service(
     script = remote_command(commands[0][0])
     assert commands[0][1] is False
     assert "Test-Path -LiteralPath $pidFile" in script
-    assert "Get-Process -Id $pid" in script
+    assert "$servicePid = Get-Content -LiteralPath $pidFile" in script
+    assert "Get-CimInstance Win32_Process" in script
+    assert "irodori_tts_infra.server.main:app" in script
+    assert "$serviceProcess.CommandLine -like" in script
+    assert 'Write-Output "running $servicePid"' in script
+    assert "$pid =" not in script
+
+
+def test_start_service_uses_non_reserved_variable_for_existing_service_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = record_commands(monkeypatch, service)
+
+    service.start_service(remote_host="gpu", remote_dir="C:/irodori")
+
+    script = remote_command(commands[0][0])
+    assert "$servicePid = Get-Content -LiteralPath $pidFile" in script
+    assert "Get-CimInstance Win32_Process" in script
+    assert "irodori_tts_infra.server.main:app" in script
+    assert "$serviceProcess.CommandLine -like" in script
+    assert 'Write-Output "running $servicePid"' in script
+    assert "$pid =" not in script
 
 
 def test_verify_voice_bank_loads_remote_env_and_checks_embedding_files(

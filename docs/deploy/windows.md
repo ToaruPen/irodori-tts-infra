@@ -41,15 +41,28 @@ C:\Users\user\irodori-tts-infra\.env
 ```
 
 The Windows `.env` should contain server/runtime settings such as
-`IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
+`IRODORI_TTS_SERVER_HOST`, `IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
 `IRODORI_TTS_PATH_TEMP_WAV_DIR`. Do not commit this file.
+
+The standard runtime uses the pinned v4 Small VoiceDesign checkpoint:
+
+```env
+IRODORI_TTS_RUNTIME_CHECKPOINT=Aratako/Irodori-TTS-v4-Small
+IRODORI_TTS_RUNTIME_CHECKPOINT_REVISION=e4aaac4df355ff560dcd35e0dae272c3a759317b
+IRODORI_TTS_RUNTIME_CHECKPOINT_SHA256=5863c986345d9f6d20b7d8748fee1af02079c5161cf0c9e52557da0a0c378593
+IRODORI_TTS_RUNTIME_CHECKPOINT_TOKENIZER_JSON_SHA256=6a0734cf21c802169defaffe719bc2ef12bb9d0be37e54b61ed27aa89394723d
+IRODORI_TTS_RUNTIME_CHECKPOINT_TOKENIZER_CONFIG_SHA256=d229a271c64de1a7939d20d3665498e873fa91d5ee2edf135d73ec752cb9c9d3
+IRODORI_TTS_RUNTIME_CFG_SCALE_CAPTION=3.0
+IRODORI_TTS_RUNTIME_WARMUP_STYLE=calm
+```
 
 For the current trained speaker embeddings, the Windows runtime voice bank can
 point at the Irodori-TTS checkout that owns the speaker files:
 
 ```env
 VOICE_BANK_DIR=C:\Users\takut\Dev\Irodori-TTS
-IRODORI_TTS_SERVER_PORT=8923
+IRODORI_TTS_SERVER_HOST=127.0.0.1
+IRODORI_TTS_SERVER_PORT=8924
 ```
 
 ## Expected Layout
@@ -92,9 +105,13 @@ Irodori-TTS plus this package:
 ```powershell
 uv venv '.runtime-venv' --python '3.11' --clear
 uv pip install --python .runtime-venv\Scripts\python.exe 'Irodori-TTS[cu128] @ file:///C:/path/to/Irodori-TTS'
-uv pip install --python .runtime-venv\Scripts\python.exe '.[server,irodori]'
+uv pip install --python .runtime-venv\Scripts\python.exe '.[all]'
 uv pip check --python .runtime-venv\Scripts\python.exe
 ```
+
+After installation, bootstrap inspects the upstream `SamplingRequest` and
+`ModelConfig` signatures. It fails when the checkout lacks the speaker and
+caption and speaker fields required by the v4 VoiceDesign checkpoint.
 
 Override the upstream checkout, Python version, or Torch backend extra with:
 
@@ -109,7 +126,7 @@ irodori-tts-deploy deploy-bootstrap \
 environment, then launches:
 
 ```powershell
-.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 0.0.0.0 --port $env:IRODORI_TTS_SERVER_PORT
+.runtime-venv\Scripts\python.exe -m uvicorn irodori_tts_infra.server.main:app --host 127.0.0.1 --port $env:IRODORI_TTS_SERVER_PORT
 ```
 
 The PID-file wrapper is intentionally minimal. If the server fails during import

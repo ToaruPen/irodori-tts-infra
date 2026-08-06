@@ -1,15 +1,16 @@
 """Phase 2 end-to-end GPU smoke test.
 
 This gate verifies the real Phase 2 chain in one pytest process:
-Irodori-TTS v3 base synthesis uses Speaker Inversion embeddings for narrator
-and character dialogue.
+the configured Irodori-TTS VoiceDesign runtime uses Speaker Inversion embeddings
+for narrator and character dialogue, including caption plus speaker conditioning.
 
 Out of scope: HTTP routing, deployment orchestration, quality metrics,
 multi-character coverage, and long-form synthesis.
 
 Preconditions:
 - Run on the Windows GPU host.
-- VOICE_BANK_DIR points to a voice bank with voice_bank_speakers.toml and characters.md.
+- VOICE_BANK_DIR points to a voice bank with voice_bank_speakers.toml.
+- characters.md is optional, matching server startup behavior.
 - At least one character in the speaker manifest has a .speaker.safetensors embedding.
 - SMOKE_SPEAKER selects the character deterministically when the voice bank has
   more than one character embedding. With exactly one, the sole character is
@@ -33,7 +34,7 @@ import pytest
 from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
 from irodori_tts_infra.engine.backends.irodori import create_irodori_backend
 from irodori_tts_infra.engine.errors import BackendUnavailableError
-from irodori_tts_infra.engine.models import PipelineConfig
+from irodori_tts_infra.engine.models import PipelineConfig, SynthesisJob
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.text.models import Segment, SegmentKind
 from irodori_tts_infra.voice_bank.models import VoiceProfile
@@ -44,7 +45,27 @@ if TYPE_CHECKING:
 
     from irodori_tts_infra.contracts.synthesis import SynthesisResult
 
-pytestmark = [pytest.mark.gpu, pytest.mark.integration]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.integration,
+    pytest.mark.filterwarnings(
+        r"ignore:`torch\.jit\.script` is deprecated\..*:DeprecationWarning",
+    ),
+    pytest.mark.filterwarnings(
+        r"ignore:`torch\.nn\.utils\.weight_norm` is deprecated.*:FutureWarning",
+    ),
+    pytest.mark.filterwarnings(
+        r"ignore:'audioop' is deprecated and slated for removal in Python 3\.13:"
+        "DeprecationWarning",
+    ),
+    pytest.mark.filterwarnings(
+        r"ignore:Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work:"
+        "RuntimeWarning",
+    ),
+    pytest.mark.filterwarnings(
+        r"ignore:unclosed file .*hparams\.yaml.*:ResourceWarning",
+    ),
+]
 
 EXPECTED_RESULT_COUNT = 2
 MAX_SMOKE_SECONDS = 300
@@ -128,6 +149,26 @@ def test_phase2_chain_uses_speaker_embeddings_for_dialogue_and_narration(
     assert result.total_elapsed_seconds < MAX_SMOKE_SECONDS
 
 
+def test_voicedesign_combines_caption_and_speaker_embedding(
+    phase2_smoke_setup: SmokeSetup,
+) -> None:
+    pipeline, _voice_profile, smoke_character_name = phase2_smoke_setup
+    result = pipeline.synthesize_job(
+        SynthesisJob(
+            segment_index=0,
+            text="落ち着いて読み上げます。",
+            speaker=smoke_character_name,
+            require_speaker=True,
+            style="calm",
+        ),
+    )
+
+    nframes, sample_rate = _decode_wav(result)
+    assert nframes > 0
+    assert sample_rate > 0
+    assert result.elapsed_seconds > 0
+
+
 def _load_smoke_voice_profile() -> VoiceProfile:
     voice_bank_dir_raw = os.environ.get("VOICE_BANK_DIR")
     if voice_bank_dir_raw is None:
@@ -138,11 +179,10 @@ def _load_smoke_voice_profile() -> VoiceProfile:
         pytest.skip(f"VOICE_BANK_DIR does not resolve to a directory: {voice_bank_dir}")
 
     speaker_manifest = voice_bank_dir / "voice_bank_speakers.toml"
-    characters_md = voice_bank_dir / "characters.md"
     if not speaker_manifest.is_file():
         pytest.skip(f"VOICE_BANK_DIR is missing voice_bank_speakers.toml: {speaker_manifest}")
-    if not characters_md.is_file():
-        pytest.skip(f"VOICE_BANK_DIR is missing characters.md: {characters_md}")
+    characters_md_candidate = voice_bank_dir / "characters.md"
+    characters_md = characters_md_candidate if characters_md_candidate.is_file() else None
 
     return load_voice_profile(
         characters_md=characters_md,

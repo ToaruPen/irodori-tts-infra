@@ -17,6 +17,7 @@ from irodori_tts_infra.client.sync import (
 from irodori_tts_infra.contracts import (
     BatchSynthesisRequest,
     BatchSynthesisResult,
+    CapabilitiesResponse,
     HealthResponse,
     SynthesisRequest,
     SynthesisResult,
@@ -58,6 +59,10 @@ class AsyncIrodoriClient:
     async def health(self) -> HealthResponse:
         response = await self._request("GET", "/health")
         return HealthResponse.model_validate_json(response.content)
+
+    async def capabilities(self) -> CapabilitiesResponse:
+        response = await self._request("GET", "/capabilities")
+        return CapabilitiesResponse.model_validate_json(response.content)
 
     async def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
         response = await self._request("POST", "/synthesize", json=_json_body(request))

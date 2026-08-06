@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess  # noqa: S404
 import sys
@@ -10,7 +11,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
-from irodori_tts_infra.contracts.synthesis import SynthesisRequest
 from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.backends.irodori import (
     INSTALL_HINT,
@@ -22,7 +22,7 @@ from irodori_tts_infra.engine.backends.irodori import (
     create_irodori_backend,
 )
 from irodori_tts_infra.engine.errors import BackendUnavailableError
-from irodori_tts_infra.engine.models import SynthesizedAudio
+from irodori_tts_infra.engine.models import ResolvedSynthesisRequest, SynthesizedAudio
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.text.models import Segment, SegmentKind
 from irodori_tts_infra.voice_bank import CharacterVoice, SpeakerEmbeddingProfile, VoiceProfile
@@ -41,17 +41,18 @@ FAKE_WAV_BYTES = b"RIFF\x08\x00\x00\x00WAVEfake"
 DEFAULT_SAMPLE_RATE = 24_000
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
+DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
 CUSTOM_STEPS = 12
 CUSTOM_CFG_TEXT = 2.25
+CUSTOM_CFG_CAPTION = 2.75
 CUSTOM_CFG_SPEAKER = 4.25
 CUSTOM_SEED = 123
 CUSTOM_DURATION_SCALE = 1.25
 CUSTOM_NUM_CANDIDATES = 2
 CUSTOM_SWAY_COEFF = -0.5
 WARMUP_STEPS = 5
-MODEL_PATH = "downloaded/model.safetensors"
-CUSTOM_MODEL_PATH = "downloaded/custom.safetensors"
+CUSTOM_REVISION = "a" * 40
 DEFAULT_REF_EMBED = "speakers/mika.speaker.safetensors"
 NARRATOR_REF_EMBED = "speakers/narrator.speaker.safetensors"
 
@@ -64,10 +65,13 @@ class FakeRuntimeResult:
 
 class FakeSamplingRequest:
     text: str
+    caption: str | None
     ref_embed: str
     num_steps: int
     cfg_scale_text: float
+    cfg_scale_caption: float
     cfg_scale_speaker: float
+    cfg_guidance_mode: str
     seed: int | None
     duration_scale: float
     num_candidates: int
@@ -79,10 +83,13 @@ class FakeSamplingRequest:
     def __init__(self, **kwargs: object) -> None:
         self.kwargs = kwargs
         self.text = cast("str", kwargs.get("text", ""))
+        self.caption = cast("str | None", kwargs.get("caption"))
         self.ref_embed = cast("str", kwargs.get("ref_embed", ""))
         self.num_steps = cast("int", kwargs.get("num_steps", 0))
         self.cfg_scale_text = cast("float", kwargs.get("cfg_scale_text", 0.0))
+        self.cfg_scale_caption = cast("float", kwargs.get("cfg_scale_caption", 0.0))
         self.cfg_scale_speaker = cast("float", kwargs.get("cfg_scale_speaker", 0.0))
+        self.cfg_guidance_mode = cast("str", kwargs.get("cfg_guidance_mode", ""))
         self.seed = cast("int | None", kwargs.get("seed"))
         self.duration_scale = cast("float", kwargs.get("duration_scale", 0.0))
         self.num_candidates = cast("int", kwargs.get("num_candidates", 0))
@@ -186,8 +193,11 @@ def fake_inference_runtime_module() -> _InferenceRuntimeModule:
 def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
     data: dict[str, object] = {
         "checkpoint": "org/model",
+        "checkpoint_tokenizer_json_sha256": None,
+        "checkpoint_tokenizer_config_sha256": None,
         "num_steps": DEFAULT_NUM_STEPS,
         "cfg_scale_text": DEFAULT_CFG_SCALE_TEXT,
+        "cfg_scale_caption": DEFAULT_CFG_SCALE_CAPTION,
         "cfg_scale_speaker": DEFAULT_CFG_SCALE_SPEAKER,
         "model_device": "cuda",
         "model_precision": "bf16",
@@ -195,6 +205,7 @@ def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
         "codec_precision": "fp32",
         "warmup_num_steps": DEFAULT_NUM_STEPS,
         "warmup_text": "テスト",
+        "warmup_style": "calm",
         "decode_mode": "batch",
         "context_kv_cache": True,
         "compile_model": False,
@@ -203,13 +214,15 @@ def runtime_settings(**overrides: object) -> IrodoriRuntimeSettings:
     return IrodoriRuntimeSettings.model_validate(data)
 
 
-def synthesis_request(**overrides: object) -> SynthesisRequest:
+def synthesis_request(**overrides: object) -> ResolvedSynthesisRequest:
     data: dict[str, object] = {
         "text": "本文です。",
         "ref_embed": DEFAULT_REF_EMBED,
         "num_steps": CUSTOM_STEPS,
         "cfg_scale_text": CUSTOM_CFG_TEXT,
+        "cfg_scale_caption": CUSTOM_CFG_CAPTION,
         "cfg_scale_speaker": CUSTOM_CFG_SPEAKER,
+        "style": "clear",
         "seed": CUSTOM_SEED,
         "duration_scale": CUSTOM_DURATION_SCALE,
         "num_candidates": CUSTOM_NUM_CANDIDATES,
@@ -217,7 +230,7 @@ def synthesis_request(**overrides: object) -> SynthesisRequest:
         "sway_coeff": CUSTOM_SWAY_COEFF,
     }
     data.update(overrides)
-    return SynthesisRequest.model_validate(data)
+    return ResolvedSynthesisRequest.model_validate(data)
 
 
 def fake_save_wav(path: str, _audio: object, _sample_rate: int) -> None:
@@ -273,7 +286,10 @@ def test_synthesize_forwards_sampling_request_fields() -> None:
     assert call.ref_embed == DEFAULT_REF_EMBED
     assert call.num_steps == CUSTOM_STEPS
     assert call.cfg_scale_text == pytest.approx(CUSTOM_CFG_TEXT)
+    assert call.caption == "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。"
+    assert call.cfg_scale_caption == pytest.approx(CUSTOM_CFG_CAPTION)
     assert call.cfg_scale_speaker == pytest.approx(CUSTOM_CFG_SPEAKER)
+    assert call.cfg_guidance_mode == "independent"
     assert call.seed == CUSTOM_SEED
     assert call.duration_scale == pytest.approx(CUSTOM_DURATION_SCALE)
     assert call.num_candidates == CUSTOM_NUM_CANDIDATES
@@ -290,6 +306,15 @@ def test_synthesize_normalizes_ref_embed_before_sampling_request() -> None:
     backend.synthesize(synthesis_request(ref_embed=f"  {DEFAULT_REF_EMBED}  "))
 
     assert runtime.calls[0].ref_embed == DEFAULT_REF_EMBED
+
+
+def test_synthesize_neutral_style_omits_caption() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.synthesize(synthesis_request(style="neutral"))
+
+    assert runtime.calls[0].caption is None
 
 
 def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:
@@ -356,7 +381,10 @@ def test_warm_up_uses_warmup_settings_and_ref_embed() -> None:
     assert call.text == "準備です。"
     assert call.ref_embed == NARRATOR_REF_EMBED
     assert call.num_steps == WARMUP_STEPS
+    assert call.caption == "穏やかで優しい女性の声で、自然に話す。"
+    assert call.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
     assert call.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
+    assert call.cfg_guidance_mode == "independent"
 
 
 def test_warm_up_normalizes_ref_embed_before_sampling_request() -> None:
@@ -419,15 +447,22 @@ def test_close_tolerates_runtime_without_unload() -> None:
         backend.warm_up()
 
 
-def test_factory_uses_injected_download_and_runtime_factory() -> None:
-    settings = runtime_settings()
+def test_factory_uses_injected_download_and_runtime_factory(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    checkpoint = snapshot / "model.safetensors"
+    checkpoint.write_bytes(b"checkpoint")
+    settings = runtime_settings(
+        checkpoint_revision=CUSTOM_REVISION,
+        checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+    )
     runtime = FakeRuntime()
     download_calls: list[dict[str, object]] = []
     runtime_keys: list[FakeRuntimeKey] = []
 
-    def download_fn(**kwargs: object) -> str:
+    def snapshot_download_fn(**kwargs: object) -> str:
         download_calls.append(kwargs)
-        return MODEL_PATH
+        return str(snapshot)
 
     def runtime_factory(key: object) -> FakeRuntime:
         assert isinstance(key, FakeRuntimeKey)
@@ -436,7 +471,7 @@ def test_factory_uses_injected_download_and_runtime_factory() -> None:
 
     backend = create_irodori_backend(
         settings,
-        hf_hub_download_fn=download_fn,
+        snapshot_download_fn=snapshot_download_fn,
         runtime_factory=runtime_factory,
         runtime_key_cls=FakeRuntimeKey,
         save_wav_fn=fake_save_wav,
@@ -444,12 +479,89 @@ def test_factory_uses_injected_download_and_runtime_factory() -> None:
     )
 
     assert isinstance(backend, IrodoriBaseBackend)
-    assert download_calls == [{"repo_id": "org/model", "filename": "model.safetensors"}]
-    assert runtime_keys[0].checkpoint == MODEL_PATH
+    assert download_calls == [
+        {
+            "repo_id": "org/model",
+            "revision": CUSTOM_REVISION,
+            "allow_patterns": ["model.safetensors", "tokenizer/*"],
+        },
+    ]
+    assert runtime_keys[0].checkpoint == str(checkpoint)
     assert runtime_keys[0].model_device == "cuda"
     assert runtime_keys[0].model_precision == "bf16"
     assert runtime_keys[0].codec_device == "cuda"
     assert runtime_keys[0].codec_precision == "fp32"
+
+
+def test_factory_rejects_checkpoint_sha_mismatch_before_runtime_creation(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"unexpected checkpoint")
+    runtime_keys: list[object] = []
+
+    def runtime_factory(key: object) -> FakeRuntime:
+        runtime_keys.append(key)
+        return FakeRuntime()
+
+    with pytest.raises(BackendUnavailableError, match="checkpoint SHA-256 mismatch"):
+        create_irodori_backend(
+            runtime_settings(
+                checkpoint_revision=CUSTOM_REVISION,
+                checkpoint_sha256="0" * 64,
+            ),
+            snapshot_download_fn=lambda **_kwargs: str(tmp_path),
+            runtime_factory=runtime_factory,
+            runtime_key_cls=FakeRuntimeKey,
+            save_wav_fn=fake_save_wav,
+            sampling_request_cls=FakeSamplingRequest,
+        )
+
+    assert runtime_keys == []
+
+
+@pytest.mark.parametrize("failure", ["missing", "mismatch"])
+def test_factory_rejects_invalid_bundled_tokenizer_before_runtime_creation(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    snapshot = tmp_path / "snapshot"
+    tokenizer_dir = snapshot / "tokenizer"
+    tokenizer_dir.mkdir(parents=True)
+    checkpoint = snapshot / "model.safetensors"
+    tokenizer_json = tokenizer_dir / "tokenizer.json"
+    tokenizer_config = tokenizer_dir / "tokenizer_config.json"
+    checkpoint.write_bytes(b"v4 checkpoint")
+    tokenizer_json.write_bytes(b"v4 tokenizer")
+    tokenizer_config.write_bytes(b"v4 tokenizer config")
+    settings = runtime_settings(
+        checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        checkpoint_tokenizer_json_sha256=hashlib.sha256(tokenizer_json.read_bytes()).hexdigest(),
+        checkpoint_tokenizer_config_sha256=hashlib.sha256(
+            tokenizer_config.read_bytes()
+        ).hexdigest(),
+    )
+    runtime_keys: list[FakeRuntimeKey] = []
+    if failure == "missing":
+        tokenizer_json.unlink()
+        expected = "bundled tokenizer.json is missing or unreadable"
+    else:
+        tokenizer_json.write_bytes(b"tampered tokenizer")
+        expected = "bundled tokenizer.json SHA-256 mismatch"
+
+    def runtime_factory(key: object) -> FakeRuntime:
+        runtime_keys.append(cast("FakeRuntimeKey", key))
+        return FakeRuntime()
+
+    with pytest.raises(BackendUnavailableError, match=expected):
+        create_irodori_backend(
+            settings,
+            snapshot_download_fn=lambda **_kwargs: str(snapshot),
+            runtime_factory=runtime_factory,
+            runtime_key_cls=FakeRuntimeKey,
+            save_wav_fn=fake_save_wav,
+            sampling_request_cls=FakeSamplingRequest,
+        )
+
+    assert runtime_keys == []
 
 
 def test_runtime_key_cls_falls_back_to_module_attr() -> None:
@@ -511,7 +623,7 @@ def test_install_hint_lists_packages_without_nonexistent_extra() -> None:
     assert "torch" in INSTALL_HINT
 
 
-def test_factory_wraps_hf_download_failure() -> None:
+def test_factory_wraps_snapshot_download_failure() -> None:
     error = OSError("network down")
 
     def download_fn(**_kwargs: object) -> str:
@@ -520,7 +632,7 @@ def test_factory_wraps_hf_download_failure() -> None:
     with pytest.raises(BackendUnavailableError, match="Failed to create Irodori") as exc_info:
         create_irodori_backend(
             runtime_settings(),
-            hf_hub_download_fn=download_fn,
+            snapshot_download_fn=download_fn,
             runtime_factory=lambda _key: FakeRuntime(),
             runtime_key_cls=FakeRuntimeKey,
             save_wav_fn=fake_save_wav,
@@ -530,16 +642,20 @@ def test_factory_wraps_hf_download_failure() -> None:
     assert exc_info.value.__cause__ is error
 
 
-def test_factory_wraps_runtime_factory_failure() -> None:
+def test_factory_wraps_runtime_factory_failure(tmp_path: Path) -> None:
     error = RuntimeError("runtime failed")
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"checkpoint")
 
     def runtime_factory(_key: object) -> FakeRuntime:
         raise error
 
     with pytest.raises(BackendUnavailableError, match="Failed to create Irodori") as exc_info:
         create_irodori_backend(
-            runtime_settings(),
-            hf_hub_download_fn=lambda **_kwargs: MODEL_PATH,
+            runtime_settings(
+                checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+            ),
+            snapshot_download_fn=lambda **_kwargs: str(tmp_path),
             runtime_factory=runtime_factory,
             runtime_key_cls=FakeRuntimeKey,
             save_wav_fn=fake_save_wav,
@@ -549,16 +665,20 @@ def test_factory_wraps_runtime_factory_failure() -> None:
     assert exc_info.value.__cause__ is error
 
 
-def test_factory_does_not_wrap_runtime_factory_type_error() -> None:
+def test_factory_does_not_wrap_runtime_factory_type_error(tmp_path: Path) -> None:
     error = TypeError("wrong runtime factory signature")
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"checkpoint")
 
     def runtime_factory(_key: object) -> FakeRuntime:
         raise error
 
     with pytest.raises(TypeError, match="wrong runtime factory signature") as exc_info:
         create_irodori_backend(
-            runtime_settings(),
-            hf_hub_download_fn=lambda **_kwargs: MODEL_PATH,
+            runtime_settings(
+                checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+            ),
+            snapshot_download_fn=lambda **_kwargs: str(tmp_path),
             runtime_factory=runtime_factory,
             runtime_key_cls=FakeRuntimeKey,
             save_wav_fn=fake_save_wav,
@@ -577,7 +697,7 @@ def test_factory_does_not_wrap_injected_download_import_error() -> None:
     with pytest.raises(ImportError, match="transitive import failed") as exc_info:
         create_irodori_backend(
             runtime_settings(),
-            hf_hub_download_fn=download_fn,
+            snapshot_download_fn=download_fn,
             runtime_factory=lambda _key: FakeRuntime(),
             runtime_key_cls=FakeRuntimeKey,
             save_wav_fn=fake_save_wav,
@@ -612,7 +732,7 @@ def test_importing_irodori_backend_is_lightweight() -> None:
 @pytest.mark.parametrize(
     ("field", "consumer"),
     [
-        ("checkpoint", "hf_hub_download"),
+        ("checkpoint", "snapshot_download"),
         ("model_device", "runtime_key"),
         ("model_precision", "runtime_key"),
         ("codec_device", "runtime_key"),
@@ -632,9 +752,16 @@ def test_importing_irodori_backend_is_lightweight() -> None:
         ("warmup_text", "warmup_request"),
     ],
 )
-def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str) -> None:
+def test_all_runtime_settings_reach_expected_consumer(
+    field: str,
+    consumer: str,
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "custom.bin"
+    checkpoint.write_bytes(b"custom checkpoint")
     settings = runtime_settings(
         checkpoint="custom/repo",
+        checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         model_device="cpu",
         model_precision="fp32",
         codec_device="mps",
@@ -651,7 +778,7 @@ def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str)
 
     def download_fn(**kwargs: object) -> str:
         download_calls.append(kwargs)
-        return CUSTOM_MODEL_PATH
+        return str(tmp_path)
 
     def runtime_factory(key: object) -> FakeRuntime:
         assert isinstance(key, FakeRuntimeKey)
@@ -661,7 +788,7 @@ def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str)
     backend = create_irodori_backend(
         settings,
         checkpoint_filename="custom.bin",
-        hf_hub_download_fn=download_fn,
+        snapshot_download_fn=download_fn,
         runtime_factory=runtime_factory,
         runtime_key_cls=FakeRuntimeKey,
         save_wav_fn=fake_save_wav,
@@ -702,7 +829,7 @@ def test_all_runtime_settings_reach_expected_consumer(field: str, consumer: str)
         "warmup_text": ("ウォームアップ本文。", runtime.calls[1].text),
     }
 
-    assert consumer in {"hf_hub_download", "runtime_key", "sampling_request", "warmup_request"}
+    assert consumer in {"snapshot_download", "runtime_key", "sampling_request", "warmup_request"}
     assert expected[field][1] == expected[field][0]
 
 
@@ -710,7 +837,7 @@ def test_contract_mapping_defaults_round_trip() -> None:
     runtime = FakeRuntime()
     backend = make_backend(runtime)
 
-    backend.synthesize(SynthesisRequest(text="本文", ref_embed=DEFAULT_REF_EMBED))
+    backend.synthesize(ResolvedSynthesisRequest(text="本文", ref_embed=DEFAULT_REF_EMBED))
 
     call = runtime.calls[0]
     assert call.num_steps == DEFAULT_NUM_STEPS

@@ -1,95 +1,139 @@
 # AGENTS.md
 
-## Project
+## WHY — Project and Runtime Contract
 
-`irodori-tts-infra` is a Python 3.11+ infrastructure project for Irodori-TTS v3 base synthesis with Speaker Inversion voice identity.
+`irodori-tts-infra` is a Python 3.11+ infrastructure project for Japanese TTS
+using Irodori-TTS v4 Small VoiceDesign with Speaker Inversion voice identity.
 
-The import package lives under `src/irodori_tts_infra/`. Tests live under `tests/`.
-Generated audio, model weights, datasets, checkpoints, and local secrets are not source files.
+The standard synthesis path is:
 
-## Architecture
+1. Text and a fixed public style preset enter the Irodori-TTS v4 VoiceDesign model.
+2. The server resolves the narrator or character to a Speaker Inversion embedding.
+3. A multi-metric quality gate produces an automated pass/fail result.
+4. Passing audio is available for playback or caching.
 
-```text
-Text → Irodori-TTS v3 base
-     → per-character Speaker Inversion embedding (.speaker.safetensors)
-     → Multi-metric quality gate (automated pass/fail)
-     → Playback / cache
-```
+The public `style` enum maps server-side to fixed VoiceDesign captions. Public
+arbitrary captions and RVC are not part of the standard path.
 
-Voice identity is supplied by the narrator or character `ref_embed` from `voice_bank_speakers.toml`. RVC and VoiceDesign captions are not part of the standard path.
+## WHAT — Repository and Sources of Truth
 
-## Commands
+- The import package is `src/irodori_tts_infra/`; tests are under `tests/`.
+- Generated audio, model weights, datasets, checkpoints, and local secrets are
+  runtime assets, not source files.
+- `pyproject.toml` owns deterministic Python tool, test, and coverage configuration.
+- The root `justfile` owns executable command expansion.
+- `docs/` owns detailed architecture, deployment, and connection guidance;
+  start with `docs/connection.md` for the remote topology and troubleshooting.
+- The nearest nested `AGENTS.md` owns subtree-specific boundaries and rules.
 
-Use `uv` for dependency management.
+Project instructions take priority over project docs, which take priority over
+implementation. If these sources contradict one another, stop and report the exact
+files and conflicting passages instead of guessing.
 
-- Install/sync: `uv sync --all-extras`
-- Lint: `uv run ruff check .`
-- Format check: `uv run ruff format --check .`
-- Format write: `uv run ruff format .`
-- Type check: `uv run mypy`
-- Default tests: `uv run pytest`
-- Integration tests: `uv run pytest -m "integration"`
-- GPU tests: `uv run pytest -m "gpu"`
-- Dead code detection: `uv run vulture src/`
-- Full verification: `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run vulture src/ && uv run pytest`
+## HOW — Commands
 
-## Quality Bar
+The root `justfile` is the executable command catalog. Run `just --list` before
+choosing a recipe. `uv` remains the package manager and command runner beneath it.
 
-Lint, type checking, and tests are the source of truth.
+- `just sync`: install local development dependencies.
+- `just test [ARGS]`: run default tests and forward pytest arguments.
+- `just check`: run the full local lint, format, type, dead-code, and test gate.
+- `just client [ARGS]` and `just deploy [ARGS]`: run the project CLIs.
+- `just remote-python SCRIPT [ARGS]` and `just remote-audit ROUND`: use the pinned
+  upstream Windows runtime for remote scripts and dataset audits.
+- `just speaker-{train-queue,speed-benchmark,apply-speed-selection,evaluation-queue,build-manifests,generate,analyze,metrics,evaluate,review-packet,staging-report}`:
+  run the local training/evaluation stages; the matching `remote-speaker-*`
+  recipes run them in the pinned Windows runtime. Remote generation uses the
+  standalone 140-case, five-checkpoint generator.
+- `just speaker-train-queue-detached {preflight,launch,status}` runs the pinned,
+  fail-closed training supervisor; `just speaker-quality-run {prepare,finalize}`
+  manages create-only quality-search/retraining evidence. Matching remote recipes
+  use the versioned Windows launcher and quality-run bundle.
+- `just speaker-checkpoint-search-{build,generate,evaluate}` runs the isolated,
+  create-only 28-case single-checkpoint diagnostic path. Matching remote recipes use
+  the pinned Windows runtime and never produce final checkpoint selections.
+- `just speaker-midpoint-diagnostic-{build,generate,evaluate}` runs the isolated,
+  create-only fixed-alpha derived-embedding diagnostic. Its synthetic step zero is
+  case identity only; the path never creates or promotes a training checkpoint.
+- `just speaker-reference-centroid-audit` runs the read-only reference identity and
+  ECAPA centroid-stability diagnostic. The matching remote recipe uses the pinned
+  Windows runtime and writes one create-only evidence report.
+- `just speaker-evaluation-speed-v4 {prepare,preflight,launch}` retains the isolated
+  speed-v4 evaluation launcher. The matching `speaker-evaluation-speed-v5` recipe is
+  the retained legacy all-model launcher. `speaker-evaluation-speed-v6` runs its
+  versioned fresh 140-case successor against the quality-successor training evidence
+  without changing the speed-v5 path or artifacts.
+  `just speaker-evaluation-speed-v6-detached {preflight,launch,status}` runs the
+  fail-closed detached supervisor; the matching remote recipe uses its create-only
+  versioned bundle and launch evidence under `evaluation_speed_v6`.
+  `just speaker-verify-retraining [ARGS]` verifies immutable training evidence or the
+  complete non-deployment workflow. Matching `remote-speaker-*` recipes run against
+  the pinned Windows workspace.
 
-### Principles
+Do not duplicate raw tool commands in instructions when a `just` recipe owns them.
 
-- **TDD**: Write the failing test first. Then write the minimal code to make it pass. Then refactor.
-- **YAGNI**: Do not build for hypothetical future requirements. Three similar lines beat a premature abstraction.
-- **DRY**: Extract shared logic only when duplication is proven and stable. Premature DRY creates coupling.
+## HOW — Development Workflow
 
-### Rules
+- Inspect the relevant implementation, tests, and nearest scoped instructions before
+  editing. Keep changes within the requested issue or ticket and preserve unrelated
+  dirty worktree changes.
+- For Python behavior changes, use Red → Green → Refactor. Bug fixes require a
+  failing-then-passing regression test.
+- Run the narrowest useful check first, then `just check` when practical. Report any
+  check blocked by GPU, network, SSH, model weights, or another external dependency.
+- Do not add architecture layers or perform broad refactors without discussion.
+  Backward compatibility is not required unless the task explicitly requires it.
+- Library code uses `structlog`; do not swallow exceptions. Handle specific failures
+  or re-raise them with context.
 
-- Keep code direct. No wrapper classes, factories, protocols, hooks, or configuration layers unless the current code needs them.
-- No placeholder comments, commented-out code, speculative TODOs, or docstrings that restate the function name.
-- No swallowed exceptions. Catch specific types and either handle or re-raise with context.
-- No `print` in library code. Use structured logging via `structlog`.
-- Prefer small typed functions with explicit inputs and outputs.
-- Public behavior changes need tests. Bug fixes need a failing-then-passing regression test.
+## HOW — Tests and Coverage
 
-### Coverage Tiers
+Default pytest runs exclude `integration`, `gpu`, and `slow` tests. Available markers:
 
-Two coverage thresholds are enforced in CI:
-- **Pure-logic modules** (text/, voice_bank/captions.py, voice_bank/models.py, engine/models.py, engine/protocols.py, engine/errors.py, contracts/): 100% line AND branch coverage. `__init__.py` re-exports are omitted.
-- **Overall project**: ≥ 80% (line + branch combined; branch coverage is enabled globally).
+- `unit`: fast and deterministic; no network, GPU, or external services.
+- `integration`: external services, network, SSH, or real subprocesses.
+- `gpu`: CUDA/GPU hardware, model weights, or the real Irodori-TTS runtime.
+- `slow`: too slow for the default local loop.
+- `ssh`: requires access to a remote host.
 
-Pure modules have no side effects — new branches there require corresponding tests before CI will pass. Use `# pragma: no cover` only for code paths that genuinely cannot run without external services (GPU, real Irodori runtime, network). Inline pragma comments must explain why.
+Mark model-, network-, GPU-, and SSH-dependent tests appropriately; default tests
+must not depend on generated audio, remote machines, or unavailable runtime assets.
 
-## Testing
+CI enforces two coverage tiers with branch coverage enabled:
 
-Default `pytest` excludes `integration`, `gpu`, and `slow` tests.
+- 100% line and branch coverage for `text/*.py`, `voice_bank/captions.py`,
+  `voice_bank/models.py`, `engine/models.py`, `engine/protocols.py`,
+  `engine/errors.py`, and `contracts/*.py`, excluding `__init__.py` re-exports.
+- At least 80% coverage for the overall project.
 
-- `unit`: fast deterministic, no external services
-- `integration`: network, SSH, subprocess, or service-dependent
-- `gpu`: CUDA/GPU or real Irodori-TTS runtime
-- `slow`: too slow for the default loop
-- `ssh`: requires remote host access
+Use `# pragma: no cover` only for paths that genuinely cannot run without an external
+service, GPU, network, or real Irodori runtime; explain the reason inline.
 
-Tests must not depend on model weights, generated audio, or remote machines unless marked.
+## HOW — Remote Runtime and Operational Safety
 
-## Hardware
+- The local infrastructure targets Python 3.11+.
+- The GPU host is Windows with an RTX 4070 12GB and is reached over Tailscale/SSH.
+- General connection and deployment settings belong in uncommitted `.env`; copy
+  `.env.example` and follow `docs/connection.md`. The current 600M retraining workspace,
+  upstream project, and virtual environment are intentionally pinned in `justfile`.
+- Remote recipes invoke the upstream Irodori-TTS project and virtual environment via
+  `uv run --project ... --no-sync --python ...`. They neither resolve an arbitrary
+  PowerShell `python` nor synchronize the pinned upstream training environment.
+- Remote checkpoint generation uses its standalone script because the infrastructure
+  package is intentionally not installed into the pinned upstream environment.
+- Do not stop or replace an active service, and do not replace the deployed voice
+  bank, without explicit user authorization.
 
-- GPU server: Windows, RTX 4070 12GB, Tailscale VPN
-- Client: macOS (Apple Silicon)
-- Host/path configuration: see `.env` (not committed; copy from `.env.example`)
-- Connection model and troubleshooting: see `docs/connection.md`
+## HOW — Repository Hygiene
 
-## Repository Hygiene
-
-- Keep `uv.lock` committed
-- Do not commit `.env`, credentials, model weights, checkpoints, generated audio, or datasets
-- Small intentional fixtures under `tests/fixtures/`
-- Commit only when explicitly asked
-
-## Agent Workflow
-
-Before editing, inspect the relevant files and existing patterns. After editing Python code, run the narrowest useful check first, then full verification when practical. If a check cannot run due to missing services, GPU, or SSH, report that explicitly.
+- Keep `uv.lock` committed.
+- Do not commit `.env`, credentials, model weights, checkpoints, generated audio, or
+  datasets.
+- Keep only small, intentional fixtures under `tests/fixtures/`.
+- Commit only when explicitly requested.
 
 ## Scoped Instructions
 
-Nested `AGENTS.md` files exist only when a subtree has different commands, constraints, or ownership.
+Nested `AGENTS.md` files under `src/irodori_tts_infra/` and `tests/` define local
+dependency boundaries, ownership, and test placement. Apply the closest file in
+addition to this root file.

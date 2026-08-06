@@ -19,10 +19,13 @@ from irodori_tts_infra.config import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-DEFAULT_PORT = 8923
+DEFAULT_PORT = 8924
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
+DEFAULT_CFG_SCALE_CAPTION = 3.0
 DEFAULT_CFG_SCALE_SPEAKER = 5.0
+REVISION_HEX_LENGTH = 40
+SHA256_HEX_LENGTH = 64
 OVERRIDE_PORT = 9001
 OVERRIDE_NUM_STEPS = 24
 OVERRIDE_CFG_SCALE_SPEAKER = 4.0
@@ -31,7 +34,7 @@ OVERRIDE_NUM_CANDIDATES = 2
 OVERRIDE_SWAY_COEFF = -0.8
 
 
-def test_settings_defaults_match_phase1_runtime_plan() -> None:
+def test_settings_defaults_match_current_runtime_contract() -> None:
     client = ClientSettings()
     server = ServerSettings()
     runtime = IrodoriRuntimeSettings()
@@ -39,11 +42,14 @@ def test_settings_defaults_match_phase1_runtime_plan() -> None:
 
     assert client.host == "127.0.0.1"
     assert client.port == DEFAULT_PORT
-    assert server.host == "0.0.0.0"  # noqa: S104
+    assert server.host == "127.0.0.1"
     assert server.port == DEFAULT_PORT
-    assert runtime.checkpoint == "Aratako/Irodori-TTS-500M-v3"
+    assert runtime.checkpoint.strip() == runtime.checkpoint
+    assert len(runtime.checkpoint_revision) == REVISION_HEX_LENGTH
+    assert len(runtime.checkpoint_sha256) == SHA256_HEX_LENGTH
     assert runtime.num_steps == DEFAULT_NUM_STEPS
     assert runtime.cfg_scale_text == pytest.approx(DEFAULT_CFG_SCALE_TEXT)
+    assert runtime.cfg_scale_caption == pytest.approx(DEFAULT_CFG_SCALE_CAPTION)
     assert runtime.cfg_scale_speaker == pytest.approx(DEFAULT_CFG_SCALE_SPEAKER)
     assert runtime.seed is None
     assert runtime.duration_scale == pytest.approx(1.0)
@@ -59,6 +65,9 @@ def test_settings_defaults_match_phase1_runtime_plan() -> None:
     assert runtime.compile_model is False
     assert runtime.warmup_num_steps == DEFAULT_NUM_STEPS
     assert runtime.warmup_text == "テスト"
+    assert runtime.warmup_style == "calm"
+    assert runtime.public_generation == "unconfigured"
+    assert runtime.emoji_conditioning_supported is True
     assert paths.temp_wav_dir.name == "irodori-tts-wav"
 
 
@@ -71,28 +80,80 @@ def test_runtime_settings_rejects_blank_checkpoint_env(
         IrodoriRuntimeSettings()
 
 
+def test_runtime_settings_normalizes_and_requires_public_generation() -> None:
+    settings = IrodoriRuntimeSettings(public_generation="  fixture-generation  ")
+
+    assert settings.public_generation == "fixture-generation"
+
+    with pytest.raises(ValidationError, match="public_generation"):
+        IrodoriRuntimeSettings(public_generation="   ")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {
+            "checkpoint_tokenizer_json_sha256": "a" * 64,
+            "checkpoint_tokenizer_config_sha256": None,
+        },
+        {
+            "checkpoint_tokenizer_json_sha256": None,
+            "checkpoint_tokenizer_config_sha256": "b" * 64,
+        },
+    ],
+)
+def test_runtime_settings_requires_complete_bundled_tokenizer_pin_pair(
+    values: dict[str, str | None],
+) -> None:
+    with pytest.raises(ValidationError, match="bundled tokenizer pins"):
+        IrodoriRuntimeSettings.model_validate(values)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "cfg_scale_text",
+        "cfg_scale_caption",
+        "cfg_scale_speaker",
+        "duration_scale",
+        "sway_coeff",
+    ],
+)
+def test_runtime_settings_rejects_non_finite_sampling_values(field: str) -> None:
+    with pytest.raises(ValidationError, match=field):
+        IrodoriRuntimeSettings.model_validate({field: float("inf")})
+
+
 def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     temp_wav_dir = tmp_path / "wav"
     monkeypatch.setenv("IRODORI_TTS_CLIENT_HOST", "100.112.161.83")
     monkeypatch.setenv("IRODORI_TTS_CLIENT_PORT", str(OVERRIDE_PORT))
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_NUM_STEPS", str(OVERRIDE_NUM_STEPS))
+    monkeypatch.setenv("IRODORI_TTS_RUNTIME_CHECKPOINT_REVISION", "a" * 40)
+    monkeypatch.setenv("IRODORI_TTS_RUNTIME_CHECKPOINT_SHA256", "b" * 64)
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_CFG_SCALE_SPEAKER", str(OVERRIDE_CFG_SCALE_SPEAKER))
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_DURATION_SCALE", str(OVERRIDE_DURATION_SCALE))
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_NUM_CANDIDATES", str(OVERRIDE_NUM_CANDIDATES))
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_T_SCHEDULE_MODE", "sway")
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_SWAY_COEFF", str(OVERRIDE_SWAY_COEFF))
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_COMPILE_MODEL", "true")
+    monkeypatch.setenv("IRODORI_TTS_RUNTIME_PUBLIC_GENERATION", "fixture-generation")
+    monkeypatch.setenv("IRODORI_TTS_RUNTIME_EMOJI_CONDITIONING_SUPPORTED", "false")
     monkeypatch.setenv("IRODORI_TTS_PATH_TEMP_WAV_DIR", str(temp_wav_dir))
 
     assert ClientSettings().host == "100.112.161.83"
     assert ClientSettings().port == OVERRIDE_PORT
     assert IrodoriRuntimeSettings().num_steps == OVERRIDE_NUM_STEPS
+    assert IrodoriRuntimeSettings().checkpoint_revision == "a" * 40
+    assert IrodoriRuntimeSettings().checkpoint_sha256 == "b" * 64
     assert IrodoriRuntimeSettings().cfg_scale_speaker == pytest.approx(OVERRIDE_CFG_SCALE_SPEAKER)
     assert IrodoriRuntimeSettings().duration_scale == pytest.approx(OVERRIDE_DURATION_SCALE)
     assert IrodoriRuntimeSettings().num_candidates == OVERRIDE_NUM_CANDIDATES
     assert IrodoriRuntimeSettings().t_schedule_mode == "sway"
     assert IrodoriRuntimeSettings().sway_coeff == pytest.approx(OVERRIDE_SWAY_COEFF)
     assert IrodoriRuntimeSettings().compile_model is True
+    assert IrodoriRuntimeSettings().public_generation == "fixture-generation"
+    assert IrodoriRuntimeSettings().emoji_conditioning_supported is False
     assert PathSettings().temp_wav_dir == temp_wav_dir
 
 
@@ -111,6 +172,15 @@ def test_invalid_port_values_are_rejected() -> None:
 
     with pytest.raises(ValidationError, match="greater than or equal"):
         ClientSettings(port=0)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "100.112.161.83", "gpu.example.com"],  # noqa: S104 - rejected inputs
+)
+def test_server_settings_rejects_non_loopback_hosts(host: str) -> None:
+    with pytest.raises(ValidationError, match="loopback"):
+        ServerSettings(host=host)
 
 
 def test_blank_path_values_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from irodori_tts_infra.contracts.capabilities import (
+    CapabilitiesResponse,
+    ConditioningCapabilities,
+    DeliveryCaptionCapability,
+    EmojiCapability,
+    Readiness,
+)
 from irodori_tts_infra.contracts.errors import ErrorDetailValue, ErrorPayload
 from irodori_tts_infra.contracts.health import HealthResponse
 from irodori_tts_infra.contracts.synthesis import (
@@ -9,13 +16,15 @@ from irodori_tts_infra.contracts.synthesis import (
     STREAM_HEADER_VERSION,
     BatchSynthesisRequest,
     BatchSynthesisResult,
+    IrodoriStyle,
     StreamChunkHeader,
     StreamHandshakeHeader,
     SynthesisRequest,
     SynthesisResult,
     SynthesisSegment,
+    style_caption,
 )
-from irodori_tts_infra.contracts.voices import VoiceProfileResponse
+from irodori_tts_infra.contracts.voices import VoiceCapability, VoiceProfileResponse
 
 __all__ = [
     "MAX_CHUNK_SIZE_BYTES",
@@ -24,13 +33,21 @@ __all__ = [
     "STREAM_HEADER_VERSION",
     "BatchSynthesisRequest",
     "BatchSynthesisResult",
+    "CapabilitiesResponse",
+    "ConditioningCapabilities",
+    "DeliveryCaptionCapability",
+    "EmojiCapability",
     "ErrorDetailValue",
     "ErrorPayload",
     "HealthResponse",
+    "IrodoriStyle",
+    "Readiness",
     "StreamChunkHeader",
     "StreamHandshakeHeader",
     "SynthesisRequest",
     "SynthesisResult",
     "SynthesisSegment",
+    "VoiceCapability",
     "VoiceProfileResponse",
+    "style_caption",
 ]

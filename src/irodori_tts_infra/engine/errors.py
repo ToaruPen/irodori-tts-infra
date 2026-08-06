@@ -15,3 +15,19 @@ class BackpressureError(EngineError):
 
 class EmptyBatchError(EngineError):
     pass
+
+
+class VoiceNotFoundError(EngineError):
+    pass
+
+
+class RuntimeGenerationMismatchError(EngineError):
+    pass
+
+
+class ModelNotLoadedError(EngineError):
+    pass
+
+
+class VoiceBankInvalidError(EngineError):
+    pass

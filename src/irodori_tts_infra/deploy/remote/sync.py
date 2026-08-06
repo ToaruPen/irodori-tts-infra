@@ -8,6 +8,7 @@ from pathlib import Path
 from irodori_tts_infra.deploy.remote._common import _powershell, _ps_quote, _run
 
 DEFAULT_REMOTE_DIR = "C:/irodori-tts-infra"
+RSYNC_REMOTE_UNAVAILABLE_CODES = frozenset({1, 12})
 RSYNC_EXCLUDES = (
     ".env",
     ".git/",
@@ -102,7 +103,7 @@ def _validate_sync_sources(repo_root: Path) -> None:
 def _is_rsync_unavailable_error(exc: subprocess.CalledProcessError) -> bool:
     output = _error_text(exc.output) + "\n" + _error_text(exc.stderr)
     normalized = output.lower()
-    return any(
+    if any(
         marker in normalized
         for marker in (
             "rsync: command not found",
@@ -111,6 +112,12 @@ def _is_rsync_unavailable_error(exc: subprocess.CalledProcessError) -> bool:
             "rsync is not recognized as an internal or external command",
             "rsync : the term 'rsync' is not recognized",
         )
+    ):
+        return True
+    return (
+        exc.returncode in RSYNC_REMOTE_UNAVAILABLE_CODES
+        and "rsync(" in normalized
+        and "unexpected end of file" in normalized
     )
 
 

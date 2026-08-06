@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING
 
-from irodori_tts_infra.config import ServerSettings
+from irodori_tts_infra.config.settings import LOOPBACK_HOSTS, ServerSettings
 from irodori_tts_infra.deploy.remote._common import (
     _load_env_script,
     _powershell,
@@ -18,6 +19,28 @@ if TYPE_CHECKING:
     import subprocess
 
 _APP_TARGET = "irodori_tts_infra.server.main:app"
+_DETACHED_LAUNCHER = (
+    "import subprocess\n"
+    "import sys\n"
+    "host = sys.argv[2]\n"
+    "port = sys.argv[3]\n"
+    "with open(sys.argv[4], 'wb') as stdout_log, "
+    "open(sys.argv[5], 'wb') as stderr_log:\n"
+    "    flags = (subprocess.CREATE_BREAKAWAY_FROM_JOB "
+    "| subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS)\n"
+    "    process = subprocess.Popen(\n"
+    "        [sys.executable, '-m', 'uvicorn', "
+    f"'{_APP_TARGET}', '--host', host, '--port', port],\n"
+    "        stdin=subprocess.DEVNULL,\n"
+    "        stdout=stdout_log,\n"
+    "        stderr=stderr_log,\n"
+    "        close_fds=True,\n"
+    "        creationflags=flags,\n"
+    "    )\n"
+    "print(process.pid)\n"
+)
+_DETACHED_BOOTSTRAP = "import base64,sys;exec(base64.urlsafe_b64decode(sys.argv[1]))"
+_DETACHED_PAYLOAD = base64.urlsafe_b64encode(_DETACHED_LAUNCHER.encode()).decode()
 
 
 def start_service(
@@ -68,16 +91,33 @@ def _start_script(remote_dir: str, *, server_host: str | None, port: int | None)
         "$pidFile = Join-Path (Get-Location) '.uvicorn.pid'; "
         "$runtimePython = Join-Path (Get-Location) '.runtime-venv/Scripts/python.exe'; "
         "if (Test-Path -LiteralPath $pidFile) { "
-        "$pid = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue; "
-        "if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) { "
-        'Write-Output "running $pid"; exit 0 } }; '
-        "$process = Start-Process -FilePath $runtimePython "
-        "-ArgumentList @("
-        f"'-m', 'uvicorn', '{_APP_TARGET}', "
-        "'--host', $serverHost, '--port', $port"
-        ") -PassThru -WindowStyle Hidden; "
-        "Set-Content -LiteralPath $pidFile -Value $process.Id; "
-        "Write-Output $process.Id"
+        f"{_read_service_process_script()}"
+        f"if ({_managed_service_condition()}) {{ "
+        'Write-Output "running $servicePid"; exit 0 } }; '
+        "$stdoutLog = Join-Path (Get-Location) '.uvicorn.stdout.log'; "
+        "$stderrLog = Join-Path (Get-Location) '.uvicorn.stderr.log'; "
+        f"$detachedBootstrap = {_ps_quote(_DETACHED_BOOTSTRAP)}; "
+        f"$detachedPayload = {_ps_quote(_DETACHED_PAYLOAD)}; "
+        "$launcherPid = & $runtimePython -c $detachedBootstrap $detachedPayload "
+        "$serverHost $port $stdoutLog $stderrLog; "
+        "if ($LASTEXITCODE -ne 0 -or !$launcherPid) "
+        "{ throw 'detached uvicorn launcher failed' }; "
+        "$serviceProcess = $null; "
+        "for ($attempt = 0; $attempt -lt 50 -and !$serviceProcess; $attempt++) { "
+        "$serviceProcess = Get-CimInstance Win32_Process "
+        '-Filter "ParentProcessId = $launcherPid" -ErrorAction SilentlyContinue '
+        f"| Where-Object {{ $_.CommandLine -like '*{_APP_TARGET}*' }} "
+        "| Select-Object -First 1; "
+        "if (!$serviceProcess) { Start-Sleep -Milliseconds 100 } }; "
+        "if (!$serviceProcess) { "
+        "$launcherProcess = Get-CimInstance Win32_Process "
+        '-Filter "ProcessId = $launcherPid" -ErrorAction SilentlyContinue; '
+        f"if ($launcherProcess.CommandLine -like '*{_APP_TARGET}*') "
+        "{ $serviceProcess = $launcherProcess } }; "
+        "if (!$serviceProcess) { throw 'uvicorn process did not start' }; "
+        "$servicePid = $serviceProcess.ProcessId; "
+        "Set-Content -LiteralPath $pidFile -Value $servicePid; "
+        "Write-Output $servicePid"
     )
 
 
@@ -85,7 +125,7 @@ def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
     default_host = _ps_quote(str(ServerSettings.model_fields["host"].default))
     default_port = _ps_quote(str(ServerSettings.model_fields["port"].default))
     host_expr = (
-        _ps_quote(server_host)
+        _ps_quote(ServerSettings(host=server_host).host)
         if server_host is not None
         else (
             "if ($env:IRODORI_TTS_SERVER_HOST) "
@@ -100,7 +140,13 @@ def _server_bind_script(*, server_host: str | None, port: int | None) -> str:
             f"{{ $env:IRODORI_TTS_SERVER_PORT }} else {{ {default_port} }}"
         )
     )
-    return f"$serverHost = {host_expr}; $port = {port_expr}; "
+    allowed_hosts = ", ".join(_ps_quote(host) for host in sorted(LOOPBACK_HOSTS))
+    return (
+        f"$serverHost = {host_expr}; "
+        f"if (@({allowed_hosts}) -notcontains $serverHost) "
+        "{ throw 'server host must be loopback' }; "
+        f"$port = {port_expr}; "
+    )
 
 
 def _stop_script(remote_dir: str) -> str:
@@ -109,9 +155,9 @@ def _stop_script(remote_dir: str) -> str:
         "$pidFile = Join-Path (Get-Location) '.uvicorn.pid'; "
         "if (!(Test-Path -LiteralPath $pidFile)) { "
         'Write-Output "stopped"; exit 0 }; '
-        "$pid = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue; "
-        "if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) { "
-        "Stop-Process -Id $pid -Force }; "
+        f"{_read_service_process_script()}"
+        f"if ({_managed_service_condition()}) {{ "
+        "Stop-Process -Id $servicePid -Force }; "
         "Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue; "
         'Write-Output "stopped"'
     )
@@ -123,9 +169,23 @@ def _status_script(remote_dir: str) -> str:
         "$pidFile = Join-Path (Get-Location) '.uvicorn.pid'; "
         "if (!(Test-Path -LiteralPath $pidFile)) { "
         'Write-Output "stopped"; exit 1 }; '
-        "$pid = Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue; "
-        "if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) { "
-        'Write-Output "running $pid"; exit 0 }; '
+        f"{_read_service_process_script()}"
+        f"if ({_managed_service_condition()}) {{ "
+        'Write-Output "running $servicePid"; exit 0 }; '
         "Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue; "
         'Write-Output "stopped"; exit 1'
     )
+
+
+def _read_service_process_script() -> str:
+    return (
+        "$servicePid = Get-Content -LiteralPath $pidFile "
+        "-ErrorAction SilentlyContinue; "
+        "$serviceProcess = if ($servicePid) { "
+        'Get-CimInstance Win32_Process -Filter "ProcessId = $servicePid" '
+        "-ErrorAction SilentlyContinue } else { $null }; "
+    )
+
+
+def _managed_service_condition() -> str:
+    return f"$serviceProcess -and $serviceProcess.CommandLine -like '*{_APP_TARGET}*'"

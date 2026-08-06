@@ -16,7 +16,12 @@ from irodori_tts_infra.contracts import (
     SynthesisResult,
     SynthesisSegment,
 )
-from irodori_tts_infra.engine.errors import BackendUnavailableError, BackpressureError
+from irodori_tts_infra.engine.errors import (
+    BackendUnavailableError,
+    BackpressureError,
+    RuntimeGenerationMismatchError,
+    VoiceNotFoundError,
+)
 from irodori_tts_infra.engine.models import SynthesisJob
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
 from irodori_tts_infra.server.dependencies import get_max_chunk_size, get_pipeline
@@ -33,7 +38,6 @@ MaxChunkSizeDependency = Annotated[int, Depends(get_max_chunk_size)]
 
 @router.post("/synthesize", response_model=SynthesisResult)
 def synthesize(request: SynthesisRequest, pipeline: PipelineDependency) -> SynthesisResult:
-    _reject_public_ref_embed(request)
     return pipeline.synthesize_job(_job_from_request(request, segment_index=0))
 
 
@@ -42,7 +46,6 @@ def synthesize_batch(
     request: BatchSynthesisRequest,
     pipeline: PipelineDependency,
 ) -> BatchSynthesisResult:
-    _reject_public_ref_embeds(request.segments)
     _validate_segment_order(request.segments)
     started = time.perf_counter()
     results = [pipeline.synthesize_job(_job_from_segment(segment)) for segment in request.segments]
@@ -104,11 +107,22 @@ def _frame_stream(
         except BackpressureError:
             yield _terminal_error_frame(frame_index, "backpressure")
             return
+        except VoiceNotFoundError:
+            yield _terminal_error_frame(frame_index, "voice_not_found")
+            return
+        except RuntimeGenerationMismatchError:
+            yield _terminal_error_frame(frame_index, "runtime_generation_mismatch")
+            return
 
 
 def _terminal_error_frame(
     segment_index: int,
-    error_code: Literal["backend_unavailable", "backpressure"],
+    error_code: Literal[
+        "backend_unavailable",
+        "backpressure",
+        "voice_not_found",
+        "runtime_generation_mismatch",
+    ],
 ) -> bytes:
     return StreamChunkHeader(
         segment_index=segment_index,
@@ -144,10 +158,8 @@ def _validate_segment_order(segments: Sequence[SynthesisSegment]) -> None:
 
 def _stream_segments(request: SynthesisRequest | BatchSynthesisRequest) -> list[SynthesisSegment]:
     if isinstance(request, BatchSynthesisRequest):
-        _reject_public_ref_embeds(request.segments)
         _validate_segment_order(request.segments)
         return request.segments
-    _reject_public_ref_embed(request)
     return [
         SynthesisSegment(
             segment_index=0,
@@ -156,27 +168,18 @@ def _stream_segments(request: SynthesisRequest | BatchSynthesisRequest) -> list[
     ]
 
 
-def _reject_public_ref_embeds(segments: Sequence[SynthesisRequest]) -> None:
-    for segment in segments:
-        _reject_public_ref_embed(segment)
-
-
-def _reject_public_ref_embed(request: SynthesisRequest) -> None:
-    if request.ref_embed is None:
-        return
-    msg = "ref_embed is resolved server-side; send speaker instead"
-    raise HTTPException(status_code=422, detail=msg)
-
-
 def _job_from_request(request: SynthesisRequest, *, segment_index: int) -> SynthesisJob:
     return SynthesisJob(
         segment_index=segment_index,
         text=request.text,
         speaker=request.speaker,
-        ref_embed=request.ref_embed,
+        voice_id=request.voice_id,
+        if_generation=request.if_generation,
         num_steps=request.num_steps,
         cfg_scale_text=request.cfg_scale_text,
+        cfg_scale_caption=request.cfg_scale_caption,
         cfg_scale_speaker=request.cfg_scale_speaker,
+        style=request.style,
         seed=request.seed,
         duration_scale=request.duration_scale,
         num_candidates=request.num_candidates,

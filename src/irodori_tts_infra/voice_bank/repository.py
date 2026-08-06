@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, cast
 from irodori_tts_infra.voice_bank.captions import load_characters_markdown
 from irodori_tts_infra.voice_bank.models import (
     CharacterVoice,
+    PortableVoice,
     SpeakerEmbeddingProfile,
     VoiceProfile,
 )
@@ -63,7 +64,7 @@ def load_voice_profile(
             resolved_characters_md.read_text(encoding="utf-8"),
         )
 
-    narrator, characters = _load_speaker_manifest(
+    narrator, characters, catalog = _load_speaker_manifest(
         speaker_manifest,
         require_embedding_files=require_embedding_files,
     )
@@ -75,7 +76,7 @@ def load_voice_profile(
         )
         raise ValueError(msg)
 
-    return VoiceProfile(characters=characters, narrator=narrator)
+    return VoiceProfile(characters=characters, narrator=narrator, catalog=catalog)
 
 
 def _find_upwards(turn_file: Path, filename: str) -> Path | None:
@@ -94,7 +95,7 @@ def _load_speaker_manifest(
     manifest: Path,
     *,
     require_embedding_files: bool,
-) -> tuple[SpeakerEmbeddingProfile, dict[str, CharacterVoice]]:
+) -> tuple[SpeakerEmbeddingProfile, dict[str, CharacterVoice], tuple[PortableVoice, ...]]:
     data = tomllib.loads(manifest.read_text(encoding="utf-8"))
     if "narrator" not in data:
         msg = "narrator is required"
@@ -110,6 +111,16 @@ def _load_speaker_manifest(
         base_dir=manifest.parent,
         require_embedding_files=require_embedding_files,
     )
+    catalog: list[PortableVoice] = [
+        _parse_portable_voice(
+            narrator_table,
+            context="narrator",
+            fallback_id="narrator",
+            fallback_label="Narrator",
+            fallback_default=True,
+            speaker=narrator,
+        )
+    ]
     character_tables = _as_table(data.get("characters", {}), "characters")
     characters: dict[str, CharacterVoice] = {}
     for name, value in character_tables.items():
@@ -120,7 +131,39 @@ def _load_speaker_manifest(
             require_embedding_files=require_embedding_files,
         )
         characters[name] = CharacterVoice(name=name, speaker=speaker)
-    return narrator, characters
+        catalog.append(
+            _parse_portable_voice(
+                _as_table(value, f"characters.{name}"),
+                context=f"characters.{name}",
+                fallback_id=name,
+                fallback_label=name,
+                fallback_default=False,
+                speaker=speaker,
+            )
+        )
+    return narrator, characters, tuple(catalog)
+
+
+def _parse_portable_voice(
+    table: Mapping[str, object],
+    *,
+    context: str,
+    fallback_id: str,
+    fallback_label: str,
+    fallback_default: bool,
+    speaker: SpeakerEmbeddingProfile,
+) -> PortableVoice:
+    default = table.get("default", fallback_default)
+    if not isinstance(default, bool):
+        msg = f"{context}.default must be a boolean"
+        raise TypeError(msg)
+    return PortableVoice(
+        id=_optional_string(table.get("voice_id"), f"{context}.voice_id", fallback_id),
+        label=_optional_string(table.get("label"), f"{context}.label", fallback_label),
+        aliases=_aliases_value(table.get("aliases", ()), f"{context}.aliases"),
+        default=default,
+        speaker=speaker,
+    )
 
 
 def _parse_speaker_profile(
@@ -171,7 +214,20 @@ def _string_value(value: object, context: str) -> str:
     if not value.strip():
         msg = f"{context} must not be blank"
         raise ValueError(msg)
-    return value
+    return value.strip()
+
+
+def _optional_string(value: object, context: str, fallback: str) -> str:
+    if value is None:
+        return fallback
+    return _string_value(value, context)
+
+
+def _aliases_value(value: object, context: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        msg = f"{context} must be an array"
+        raise TypeError(msg)
+    return tuple(_string_value(alias, f"{context}[]") for alias in value)
 
 
 def _resolve_manifest_path(value: str, *, base_dir: Path) -> Path:

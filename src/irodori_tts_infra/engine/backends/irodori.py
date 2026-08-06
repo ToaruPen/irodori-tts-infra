@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import os
 import tempfile
@@ -9,12 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from irodori_tts_infra.config.settings import PathSettings
+from irodori_tts_infra.contracts.synthesis import style_caption
 from irodori_tts_infra.engine.errors import BackendUnavailableError
 from irodori_tts_infra.engine.models import SynthesizedAudio
 
 if TYPE_CHECKING:
     from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
-    from irodori_tts_infra.contracts.synthesis import SynthesisRequest
+    from irodori_tts_infra.engine.models import ResolvedSynthesisRequest
 
 INSTALL_HINT = (
     "Irodori backend requires optional dependencies. Install: "
@@ -25,7 +27,7 @@ SaveWavFn = Callable[[str, object, int], object]
 RequestFactory = Callable[..., object]
 RuntimeKeyFactory = Callable[..., object]
 RuntimeFactory = Callable[[object], "RuntimeLike"]
-HfHubDownloadFn = Callable[..., str]
+HfSnapshotDownloadFn = Callable[..., str]
 
 
 class RuntimeResultLike(Protocol):
@@ -79,19 +81,18 @@ class IrodoriBaseBackend:
         self._sampling_request_cls = sampling_request_cls
         self._closed = False
 
-    def synthesize(self, request: SynthesisRequest) -> SynthesizedAudio:
+    def synthesize(self, request: ResolvedSynthesisRequest) -> SynthesizedAudio:
         self._ensure_open()
-        if request.ref_embed is None or not request.ref_embed.strip():
-            msg = "synthesis ref_embed is required"
-            raise BackendUnavailableError(msg)
-        ref_embed = request.ref_embed.strip()
 
         sampling_request = self._sampling_request_cls(
             text=request.text,
-            ref_embed=ref_embed,
+            caption=style_caption(request.style),
+            ref_embed=request.ref_embed,
             num_steps=request.num_steps,
             cfg_scale_text=request.cfg_scale_text,
+            cfg_scale_caption=request.cfg_scale_caption,
             cfg_scale_speaker=request.cfg_scale_speaker,
+            cfg_guidance_mode="independent",
             seed=request.seed,
             duration_scale=request.duration_scale,
             num_candidates=request.num_candidates,
@@ -113,10 +114,13 @@ class IrodoriBaseBackend:
         normalized_ref_embed = ref_embed.strip()
         request = self._sampling_request_cls(
             text=self._settings.warmup_text,
+            caption=style_caption(self._settings.warmup_style),
             ref_embed=normalized_ref_embed,
             num_steps=self._settings.warmup_num_steps,
             cfg_scale_text=self._settings.cfg_scale_text,
+            cfg_scale_caption=self._settings.cfg_scale_caption,
             cfg_scale_speaker=self._settings.cfg_scale_speaker,
+            cfg_guidance_mode="independent",
             seed=self._settings.seed,
             duration_scale=self._settings.duration_scale,
             num_candidates=self._settings.num_candidates,
@@ -163,13 +167,13 @@ def create_irodori_backend(
     settings: IrodoriRuntimeSettings,
     *,
     checkpoint_filename: str = "model.safetensors",
-    hf_hub_download_fn: HfHubDownloadFn | None = None,
+    snapshot_download_fn: HfSnapshotDownloadFn | None = None,
     runtime_factory: RuntimeFactory | None = None,
     runtime_key_cls: RuntimeKeyFactory | None = None,
     save_wav_fn: SaveWavFn | None = None,
     sampling_request_cls: RequestFactory | None = None,
 ) -> IrodoriBaseBackend:
-    download_fn = hf_hub_download_fn or _import_hf_hub_download()
+    snapshot_fn = snapshot_download_fn or _import_snapshot_download()
     inference_runtime = _import_inference_runtime_if_needed(
         runtime_factory=runtime_factory,
         runtime_key_cls=runtime_key_cls,
@@ -185,12 +189,22 @@ def create_irodori_backend(
     )
 
     try:
-        checkpoint = download_fn(
-            repo_id=settings.checkpoint,
-            filename=checkpoint_filename,
+        snapshot_root = Path(
+            snapshot_fn(
+                repo_id=settings.checkpoint,
+                revision=settings.checkpoint_revision,
+                allow_patterns=[checkpoint_filename, "tokenizer/*"],
+            )
         )
+        checkpoint = snapshot_root / checkpoint_filename
+        _verify_file_sha256(
+            checkpoint,
+            expected=settings.checkpoint_sha256,
+            label="checkpoint",
+        )
+        _verify_bundled_tokenizer(snapshot_root, settings)
         runtime_key = resolved_runtime_key_cls(
-            checkpoint=checkpoint,
+            checkpoint=str(checkpoint),
             model_device=settings.model_device,
             model_precision=settings.model_precision,
             codec_device=settings.codec_device,
@@ -209,6 +223,42 @@ def create_irodori_backend(
         settings=settings,
         save_wav_fn=resolved_save_wav_fn,
         sampling_request_cls=resolved_sampling_request_cls,
+    )
+
+
+def _verify_file_sha256(path: Path, *, expected: str, label: str) -> None:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        msg = f"{label} is missing or unreadable: {path}"
+        raise BackendUnavailableError(msg) from exc
+    actual = digest.hexdigest()
+    if actual != expected:
+        msg = f"{label} SHA-256 mismatch: expected {expected}, got {actual}"
+        raise BackendUnavailableError(msg)
+
+
+def _verify_bundled_tokenizer(
+    snapshot_root: Path,
+    settings: IrodoriRuntimeSettings,
+) -> None:
+    json_pin = settings.checkpoint_tokenizer_json_sha256
+    config_pin = settings.checkpoint_tokenizer_config_sha256
+    if json_pin is None or config_pin is None:
+        return
+    tokenizer_root = snapshot_root / "tokenizer"
+    _verify_file_sha256(
+        tokenizer_root / "tokenizer.json",
+        expected=json_pin,
+        label="bundled tokenizer.json",
+    )
+    _verify_file_sha256(
+        tokenizer_root / "tokenizer_config.json",
+        expected=config_pin,
+        label="bundled tokenizer_config.json",
     )
 
 
@@ -273,14 +323,14 @@ def _require_inference_runtime(
     return _import_inference_runtime()
 
 
-def _import_hf_hub_download() -> HfHubDownloadFn:
+def _import_snapshot_download() -> HfSnapshotDownloadFn:
     try:
         module = importlib.import_module("huggingface_hub")
     except ImportError as exc:
         raise BackendUnavailableError(INSTALL_HINT) from exc
     return cast(  # pragma: no cover - requires real huggingface_hub
-        "HfHubDownloadFn",
-        module.hf_hub_download,
+        "HfSnapshotDownloadFn",
+        module.snapshot_download,
     )
 
 
