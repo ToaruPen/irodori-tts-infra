@@ -90,6 +90,10 @@ client *args:
 v4-inference-benchmark *args:
     uv run python scripts/benchmark_v4_inference.py "$@"
 
+# Prepare or score a create-only local fixed-profile blind AB listening packet.
+v4-inference-blind-ab *args:
+    uv run python scripts/v4_inference_blind_ab.py "$@"
+
 # Run the deployment CLI, forwarding all arguments.
 deploy *args:
     uv run irodori-tts-deploy "$@"

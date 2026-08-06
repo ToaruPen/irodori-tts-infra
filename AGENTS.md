@@ -41,6 +41,9 @@ choosing a recipe. `uv` remains the package manager and command runner beneath i
 - `just client [ARGS]` and `just deploy [ARGS]`: run the project CLIs.
 - `just v4-inference-benchmark [ARGS]`: compare v4 sampling profiles against the
   active capability catalog without retaining text, voice metadata, or audio.
+- `just v4-inference-blind-ab {prepare,score} [ARGS]`: prepare or score a
+  create-only local fixed-profile listening packet; it never changes runtime or
+  production configuration.
 - `just remote-python SCRIPT [ARGS]` and `just remote-audit ROUND`: use the pinned
   upstream Windows runtime for remote scripts and dataset audits.
 - `just speaker-{train-queue,speed-benchmark,apply-speed-selection,evaluation-queue,build-manifests,generate,analyze,metrics,evaluate,review-packet,staging-report}`:
