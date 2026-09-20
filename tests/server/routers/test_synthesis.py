@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -96,7 +97,7 @@ def test_synthesize_resolves_speaker_on_server_voice_profile(
         )
 
     assert response.status_code == status.HTTP_200_OK
-    assert synthesizer.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
+    assert synthesizer.calls[0].ref_embed == str(Path("speakers/mika.speaker.safetensors"))
 
 
 def test_synthesize_resolves_versioned_voice_from_runtime_catalog(

@@ -1337,13 +1337,22 @@ def test_supervisor_rejects_output_alias_swapped_before_terminal_publish(
     handoff = json.loads((launch_dir / "parent-handoff-evidence.json").read_text(encoding="utf-8"))
     status_path.write_text('{"stage":"evaluate","status":"success"}\n', encoding="utf-8")
     moved_root = tmp_path / "moved-evaluation-speed-v7"
+    queue_finished = False
 
     class Process:
         @staticmethod
         def wait() -> int:
+            nonlocal queue_finished
+            queue_finished = True
+            return 0
+
+    def probe() -> Any:  # noqa: ANN401
+        # Swap once the queue log is closed: Windows cannot rename a directory that still
+        # holds an open file, and the alias only has to appear before the terminal publish.
+        if queue_finished and not moved_root.exists():
             output_root.rename(moved_root)
             output_root.symlink_to(moved_root, target_is_directory=True)
-            return 0
+        return _safe_runtime(module)
 
     def popen(_command: tuple[str, ...], **kwargs: object) -> Process:
         output = cast("Any", kwargs["stdout"])
@@ -1361,11 +1370,12 @@ def test_supervisor_rejects_output_alias_swapped_before_terminal_publish(
             upstream_root=tmp_path,
             output_root=output_root,
             status_path=status_path,
-            probe=lambda: _safe_runtime(module),
+            probe=probe,
             popen=popen,
             current_pid=SUPERVISOR_PID,
         )
 
+    assert moved_root.is_dir()
     moved_launch = moved_root / "launches" / launch_dir.name
     assert not (moved_launch / "terminal-final-evidence.json").exists()
 

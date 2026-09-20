@@ -4,6 +4,7 @@ import subprocess  # noqa: S404
 import sys
 import threading
 import time
+from pathlib import Path
 from queue import Queue
 from typing import TYPE_CHECKING
 
@@ -244,7 +245,7 @@ def test_single_narration_segment_uses_narrator_ref_embed() -> None:
     result = pipeline.synthesize_batch([narration()])
 
     assert result.results[0].segment_index == 0
-    assert fake.calls[0].ref_embed == "speakers/narrator.speaker.safetensors"
+    assert fake.calls[0].ref_embed == str(Path("speakers/narrator.speaker.safetensors"))
 
 
 def test_single_dialogue_segment_uses_known_speaker_ref_embed() -> None:
@@ -253,7 +254,7 @@ def test_single_dialogue_segment_uses_known_speaker_ref_embed() -> None:
 
     pipeline.synthesize_batch([dialogue()])
 
-    assert fake.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
+    assert fake.calls[0].ref_embed == str(Path("speakers/mika.speaker.safetensors"))
 
 
 @pytest.mark.parametrize("selector_kind", ["id", "alias"])

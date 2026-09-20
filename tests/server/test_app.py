@@ -5,6 +5,7 @@ import subprocess  # noqa: S404
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
@@ -23,7 +24,6 @@ from irodori_tts_infra.server.app import create_app, create_app_from_factory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from irodori_tts_infra.engine.pipeline import SynthesisPipeline
     from irodori_tts_infra.voice_bank import VoiceProfile
@@ -86,7 +86,7 @@ def test_create_app_warms_up_and_closes_backend(
         assert response.status_code == status.HTTP_200_OK
         assert warmable_synthesizer.warm_up_calls == 1
         assert warmable_synthesizer.warm_up_ref_embeds == [
-            "speakers/narrator.speaker.safetensors",
+            str(Path("speakers/narrator.speaker.safetensors")),
         ]
         assert warmable_synthesizer.close_calls == 0
         assert response.json()["model_loaded"] is True
