@@ -64,6 +64,23 @@ def test_generated_beep_frequencies_are_detected(frequency_hz: float) -> None:
     )
 
 
+def test_beep_that_glides_into_its_pitch_is_detected() -> None:
+    # Generated beeps often continue a glide in one dominated run; the steady part still counts.
+    samples = _voice_like(2.0)
+    start = int(TONE_START_SECONDS * SAMPLE_RATE)
+    glide = np.linspace(985.0, 1000.6, int(0.06 * SAMPLE_RATE))
+    pitch = np.concatenate([glide, np.full(int(0.12 * SAMPLE_RATE), 1000.6)])
+    samples[start : start + pitch.size] = 0.3 * np.sin(2 * np.pi * np.cumsum(pitch) / SAMPLE_RATE)
+
+    beeps = find_censor_beeps(samples, SAMPLE_RATE)
+
+    assert len(beeps) == 1
+    assert beeps[0].frequency_hz == pytest.approx(1000.6, abs=FREQUENCY_TOLERANCE_HZ)
+    assert beeps[0].start_seconds == pytest.approx(
+        TONE_START_SECONDS + 0.06, abs=START_TOLERANCE_SECONDS
+    )
+
+
 def test_stable_tone_outside_beep_bands_is_ignored() -> None:
     assert find_censor_beeps(_with_tone(850.0), SAMPLE_RATE) == ()
 
@@ -75,9 +92,9 @@ def test_tone_shorter_than_minimum_run_is_ignored() -> None:
 def test_in_band_tone_with_drifting_pitch_is_ignored() -> None:
     samples = _voice_like(2.0)
     start = int(TONE_START_SECONDS * SAMPLE_RATE)
-    time = np.arange(int(0.3 * SAMPLE_RATE)) / SAMPLE_RATE
-    pitch = 1000.0 + 8.0 * np.sin(2 * np.pi * 2.0 * time)
-    samples[start : start + time.size] = 0.3 * np.sin(2 * np.pi * np.cumsum(pitch) / SAMPLE_RATE)
+    # The pitch never settles: a slow vibrato would rest at its turning points like a beep.
+    pitch = np.linspace(990.0, 1010.0, int(0.15 * SAMPLE_RATE))
+    samples[start : start + pitch.size] = 0.3 * np.sin(2 * np.pi * np.cumsum(pitch) / SAMPLE_RATE)
 
     assert find_censor_beeps(samples, SAMPLE_RATE) == ()
 
