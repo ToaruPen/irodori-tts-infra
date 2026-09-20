@@ -286,6 +286,31 @@ def test_server_main_reports_voice_bank_invalid_without_voice_bank_env(
     assert capabilities.ready is False
 
 
+def test_server_main_guards_the_backend_against_censor_beeps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from irodori_tts_infra.engine.backends.fake import FakeSynthesizer  # noqa: PLC0415
+    from irodori_tts_infra.engine.beep_guard import BeepGuardedSynthesizer  # noqa: PLC0415
+
+    embedding = tmp_path / "speakers" / "narrator.speaker.safetensors"
+    embedding.parent.mkdir()
+    embedding.write_bytes(b"fixture")
+    manifest = tmp_path / "voice_bank_speakers.toml"
+    manifest.write_text(
+        '[narrator]\nref_embed = "speakers/narrator.speaker.safetensors"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VOICE_BANK_SPEAKER_MANIFEST", str(manifest))
+    monkeypatch.delenv("VOICE_BANK_DIR", raising=False)
+    server_main = importlib.reload(importlib.import_module("irodori_tts_infra.server.main"))
+    monkeypatch.setattr(server_main, "create_irodori_backend", lambda _: FakeSynthesizer())
+
+    pipeline = server_main._build_pipeline(server_main.settings)  # noqa: SLF001
+
+    assert isinstance(pipeline.backend, BeepGuardedSynthesizer)
+
+
 def test_server_main_reports_voice_bank_invalid_when_embedding_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

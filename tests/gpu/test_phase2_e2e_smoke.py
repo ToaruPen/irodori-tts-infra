@@ -33,6 +33,7 @@ import pytest
 
 from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
 from irodori_tts_infra.engine.backends.irodori import create_irodori_backend
+from irodori_tts_infra.engine.beep_guard import BeepGuardedSynthesizer
 from irodori_tts_infra.engine.errors import BackendUnavailableError
 from irodori_tts_infra.engine.models import PipelineConfig, SynthesisJob
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
@@ -91,7 +92,8 @@ def phase2_smoke_setup() -> Iterator[SmokeSetup]:
 
         yield (
             SynthesisPipeline(
-                backend,
+                # Same wiring as server.main: real backend WAVs must stay decodable by the guard.
+                BeepGuardedSynthesizer(backend),
                 voice_profile,
                 config=PipelineConfig(capacity=1),
             ),

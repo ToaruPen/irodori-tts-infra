@@ -16,7 +16,7 @@ VoiceDesign caption. Arbitrary captions and RVC are not part of the standard
 path.
 
 The default checkpoint is
-`Aratako/Irodori-TTS-v4-Small` at its repository-pinned revision and hashes.
+`Aratako/Irodori-TTS-v4.1-Small` at its repository-pinned revision and hashes.
 
 ## Runtime capabilities
 
@@ -41,6 +41,9 @@ service is an explicit operational step. Repository checks and training output
 must never promote those changes automatically.
 
 ## Development
+
+For a new Windows GPU PC, start with [local setup](docs/deploy/windows.md#local-pc-setup).
+Local use does not require the historical GPU host or an SSH tunnel.
 
 ```bash
 uv sync --all-extras

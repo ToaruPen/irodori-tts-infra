@@ -117,10 +117,14 @@ service, GPU, network, or real Irodori runtime; explain the reason inline.
 ## HOW — Remote Runtime and Operational Safety
 
 - The local infrastructure targets Python 3.11+.
-- The GPU host is Windows with an RTX 4070 12GB and is reached over Tailscale/SSH.
+- The GPU runtime runs on Windows with a CUDA-capable NVIDIA GPU. Verify the
+  current GPU with `nvidia-smi`; the historical RTX 4070 host is not required.
+  Local clients use loopback directly; remote clients use Tailscale/SSH.
 - General connection and deployment settings belong in uncommitted `.env`; copy
   `.env.example` and follow `docs/connection.md`. The current 600M retraining workspace,
-  upstream project, and virtual environment are intentionally pinned in `justfile`.
+  upstream project, and virtual environment are intentionally pinned in `justfile`
+  for historical training runs, not for provisioning a new PC. See
+  `docs/deploy/windows.md` for local setup.
 - Remote recipes invoke the upstream Irodori-TTS project and virtual environment via
   `uv run --project ... --no-sync --python ...`. They neither resolve an arbitrary
   PowerShell `python` nor synchronize the pinned upstream training environment.

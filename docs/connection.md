@@ -1,17 +1,22 @@
 # Connection
 
-This project reaches the Windows GPU host through an SSH tunnel over Tailscale.
+On the Windows GPU host itself, clients connect directly to loopback. Remote
+clients reach the Windows GPU host through an SSH tunnel over Tailscale.
 The HTTP server binds only to Windows loopback; do not expose it through LAN
 addresses or public port forwarding.
 
 ## Hosts
 
-- Client: macOS
-- GPU host: Windows, RTX 4070, reachable through Tailscale
-- SSH transport: OpenSSH over the Tailscale address
+- Client: local Windows, or a remote machine with an SSH client
+- GPU host: Windows with a CUDA-capable NVIDIA GPU; inspect it with `nvidia-smi`
+- Remote transport: OpenSSH over the current host's Tailscale address
 - Standard HTTP port: `8924`
 
-Keep the concrete host in local `.env` or shell state:
+For local setup, follow [Windows deployment](deploy/windows.md#local-pc-setup).
+No SSH server or `IRODORI_REMOTE_HOST` is needed for local use. Check the API
+with `Invoke-RestMethod http://127.0.0.1:8924/health` in PowerShell.
+
+For remote use, keep the concrete host in local `.env` or shell state:
 
 ```env
 IRODORI_REMOTE_HOST=user@100.x.y.z
@@ -102,6 +107,13 @@ unsupported. Style names such as `calm`, `cheerful`, and `clear` are
 server-owned convenience presets, not Irodori-TTS v4 recommendations or public
 voice-catalog fields.
 
+The v4 base model occasionally renders explicit words as a machine censor beep
+(a steady tone near 710 Hz or 1 kHz), even with speaker embeddings trained on
+beep-free audio. The server inspects every synthesized segment and regenerates
+a beeping one with the next seed, up to four attempts in total. If every attempt
+beeps, the segment fails closed as `backend_unavailable`; the server log records
+`censor_beep_detected` for each rejected attempt, without the request text.
+
 Do not restart the service, replace the standard voice bank, or change the
 standard generation as part of a repository-only migration. Each operation
 requires separate approval and an explicit rollback target.
@@ -135,5 +147,8 @@ at an upstream v3 `remote_server.py` process.
   local SSH forwarding command is still running.
 - `say.py` cannot find a speaker: compare the requested character name with
   `GET /capabilities` and the active server-side voice-bank manifest.
+- Synthesis of one sentence returns `backend_unavailable` while others succeed:
+  check the server log for `censor_beep_detected`. Four consecutive beeping
+  attempts reject the segment instead of playing the beep.
 - Synthesis rejects `ref_embed` or a caption: this is expected. Use a deployed
   `speaker` name and a fixed `style` with the standard infra server.
