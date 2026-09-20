@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import zlib
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -788,7 +789,7 @@ async def test_synthesize_stream_posts_single_request_to_asgi_server() -> None:
 
     assert b"".join(chunks) == b"RIFFstream"
     assert len(synthesizer.calls) == 1
-    assert synthesizer.calls[0].ref_embed == "speakers/mika.speaker.safetensors"
+    assert synthesizer.calls[0].ref_embed == str(Path("speakers/mika.speaker.safetensors"))
 
 
 @pytest.mark.asyncio
@@ -835,8 +836,8 @@ async def test_synthesize_stream_reconstructs_batch_stream_from_asgi_server() ->
 
     assert chunks == [b"RIFF", b"zero", b"RIFF", b"one"]
     assert [call.ref_embed for call in synthesizer.calls] == [
-        "speakers/narrator.speaker.safetensors",
-        "speakers/mika.speaker.safetensors",
+        str(Path("speakers/narrator.speaker.safetensors")),
+        str(Path("speakers/mika.speaker.safetensors")),
     ]
 
 

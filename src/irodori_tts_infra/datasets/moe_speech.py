@@ -127,6 +127,9 @@ def extract_character_dataset(
         )
         serialized_index = index.to_json()
         (temp_dir / "index.json").write_text(serialized_index, encoding="utf-8")
+        if out_dir.exists():
+            # Already verified empty. Windows cannot rename a directory over an existing one.
+            out_dir.rmdir()
         temp_dir.replace(out_dir)
 
     _LOGGER.info(

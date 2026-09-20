@@ -45,6 +45,13 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
+# Mirrors _secure_open_flags in the script, which refuses platforms without dir_fd-anchored,
+# no-follow file access. Packet prepare/score cannot run there, so neither can these tests.
+requires_secure_fs = pytest.mark.skipif(
+    os.name == "nt" or os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"),
+    reason="v4_inference_blind_ab requires dir_fd-anchored, no-follow file access",
+)
+
 SCRIPT_PATH = Path("scripts/v4_inference_blind_ab.py")
 ASSET_ROOT = Path("scripts/assets/v4_inference_blind_ab")
 _SAMPLES = tuple(f"評価文{index}" for index in range(6))
@@ -2056,6 +2063,7 @@ def test_public_ui_assets_contain_no_condition_or_runtime_clues() -> None:
         assert forbidden not in public_source
 
 
+@requires_secure_fs
 @pytest.mark.asyncio
 async def test_prepare_with_repository_assets_yields_complete_condition_blind_packet(
     tmp_path: Path,
@@ -2143,6 +2151,7 @@ async def test_prepare_with_repository_assets_yields_complete_condition_blind_pa
     assert raw_generation not in answer_key_text
 
 
+@requires_secure_fs
 @pytest.mark.asyncio
 async def test_prepare_generates_exact_blind_packet_from_pair_plans(
     tmp_path: Path,
@@ -2447,6 +2456,7 @@ async def test_prepare_rejects_missing_or_symlinked_assets(
     assert list(tmp_path.glob(".packet.tmp-*")) == []
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("asset_name", ["index.html", "review.js"])
 @pytest.mark.asyncio
 async def test_prepare_rejects_oversized_ui_asset_with_bounded_chunk_reads(
@@ -2516,6 +2526,7 @@ async def test_prepare_maps_asset_copy_resource_failure_and_cleans_output(
     assert list(tmp_path.glob(".packet.tmp-*")) == []
 
 
+@requires_secure_fs
 @pytest.mark.asyncio
 async def test_prepare_uses_256_bit_csprng_seed_seam(
     tmp_path: Path,
@@ -2592,6 +2603,7 @@ async def _prepare_scoring_fixture(
     return packet_root, results_path, manifest_wrapper, answer_key
 
 
+@requires_secure_fs
 @pytest.mark.asyncio
 async def test_score_packet_validates_real_packet_and_returns_public_machine_score(
     tmp_path: Path,
@@ -2634,6 +2646,7 @@ async def test_score_packet_validates_real_packet_and_returns_public_machine_sco
         assert private_value not in serialized
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("asset_name", ["index.html", "review.js"])
 @pytest.mark.asyncio
 async def test_score_packet_rejects_one_byte_public_ui_tamper(
@@ -2655,6 +2668,7 @@ async def test_score_packet_rejects_one_byte_public_ui_tamper(
         module.score_packet(packet_root, results_path)
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("asset_name", ["index.html", "review.js"])
 @pytest.mark.asyncio
 async def test_score_rejects_packet_ui_and_answer_key_digest_changed_together(
@@ -2678,6 +2692,7 @@ async def test_score_rejects_packet_ui_and_answer_key_digest_changed_together(
         module.score_packet(packet_root, results_path)
 
 
+@requires_secure_fs
 @pytest.mark.parametrize(
     "tamper",
     ["randomization-seed", "display-order", "baseline-side-swap", "request-order"],
@@ -2717,6 +2732,7 @@ async def test_score_packet_reconstructs_randomization_metadata_and_rejects_tamp
         module.score_packet(packet_root, results_path)
 
 
+@requires_secure_fs
 @pytest.mark.asyncio
 async def test_score_packet_rejects_reordered_manifest_pairs_with_stale_canonical_digest(
     tmp_path: Path,
@@ -2749,6 +2765,7 @@ async def test_score_packet_rejects_reordered_manifest_pairs_with_stale_canonica
         module.score_packet(packet_root, results_path)
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("corruption", ["manifest-wrapper", "answer-key", "audio"])
 @pytest.mark.asyncio
 async def test_score_packet_maps_packet_corruption_to_integrity_error(
@@ -2779,6 +2796,7 @@ async def test_score_packet_maps_packet_corruption_to_integrity_error(
         module.score_packet(packet_root, results_path)
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("corruption", ["json", "packet-id", "extra-answer"])
 @pytest.mark.asyncio
 async def test_score_packet_maps_results_corruption_to_invalid_results(
@@ -2975,6 +2993,7 @@ async def test_execute_prepare_uses_direct_transport_no_client_timeout_and_globa
     ]
 
 
+@requires_secure_fs
 @pytest.mark.asyncio
 async def test_execute_prepare_rejects_pre_open_packet_tamper_without_launching(
     tmp_path: Path,
@@ -3316,6 +3335,7 @@ def test_fd_directory_enumeration_stops_after_expected_plus_one(
     assert entries.yielded == 2
 
 
+@requires_secure_fs
 def test_directory_fd_remains_anchored_after_path_is_replaced_with_symlink(
     tmp_path: Path,
 ) -> None:
@@ -3339,6 +3359,7 @@ def test_directory_fd_remains_anchored_after_path_is_replaced_with_symlink(
     assert value == b"anchored"
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("target", ["root", "manifest", "results"])
 @pytest.mark.asyncio
 async def test_score_rejects_symlinked_untrusted_directories_and_files(
@@ -3423,6 +3444,7 @@ def _run_fifo_call_bounded(
     return value
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("target", ["manifest", "results"])
 @pytest.mark.asyncio
 async def test_score_rejects_fifo_inputs_without_blocking(
@@ -3446,6 +3468,7 @@ async def test_score_rejects_fifo_inputs_without_blocking(
     assert time.monotonic() - started < 1.0
 
 
+@requires_secure_fs
 def test_bounded_fifo_call_fails_promptly_and_joins_a_blocked_reader(tmp_path: Path) -> None:
     fifo_path = tmp_path / "blocking-reader"
     os.mkfifo(fifo_path)
@@ -3809,6 +3832,7 @@ def _packet_fifo_path(case_root: Path, wrapper: dict[str, Any], case: str) -> Pa
     }[case]
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("case", _PACKET_TAMPER_CASES)
 @pytest.mark.asyncio
 async def test_score_rejects_complete_packet_tamper_matrix_at_stable_boundary(
@@ -3963,6 +3987,7 @@ _RESULTS_TAMPER_CASES = (
 )
 
 
+@requires_secure_fs
 @pytest.mark.parametrize("case", _RESULTS_TAMPER_CASES)
 @pytest.mark.asyncio
 async def test_score_rejects_complete_results_tamper_matrix_at_stable_boundary(

@@ -1,0 +1,3 @@
+# Evidence scripts are pinned by SHA-256 and Ruff formats with LF, so a Windows checkout with
+# core.autocrlf must not rewrite line endings.
+* text=auto eol=lf
