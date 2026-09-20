@@ -186,6 +186,8 @@ skip-magic-trailing-comma = false
 
 [tool.mypy]
 python_version = "3.11"
+# Tests use POSIX-only os APIs (mkfifo, O_NONBLOCK). Check as CI does so every host agrees.
+platform = "linux"
 files = ["src", "tests"]
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 namespace_packages = false

@@ -129,6 +129,7 @@ def _source_manifest(tmp_path: Path) -> Path:
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return path
 
@@ -142,7 +143,7 @@ def _build_fixture(tmp_path: Path) -> tuple[ModuleType, Path, Path, Path]:
     embedding = output_dir / "checkpoint_0000250.speaker.safetensors"
     _write_embedding(embedding)
     clean_manifest = tmp_path / "clean-manifest.jsonl"
-    clean_manifest.write_text('{"source_id":"sample"}\n', encoding="utf-8")
+    clean_manifest.write_text('{"source_id":"sample"}\n', encoding="utf-8", newline="\n")
     config = run_root / "training-config.json"
     config.write_text(
         json.dumps(
@@ -157,6 +158,7 @@ def _build_fixture(tmp_path: Path) -> tuple[ModuleType, Path, Path, Path]:
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return module, source, embedding, config
 
@@ -217,6 +219,7 @@ def _write_run_evidence(  # noqa: PLR0914 - mirrors the real run-evidence artifa
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     prefix = (
         json.dumps(
@@ -268,15 +271,16 @@ def _write_run_evidence(  # noqa: PLR0914 - mirrors the real run-evidence artifa
         + b"\n"
     )
     setup = run_root / "setup-evidence.json"
-    setup.write_text(json.dumps({"model_id": MODEL_ID}), encoding="utf-8")
+    setup.write_text(json.dumps({"model_id": MODEL_ID}), encoding="utf-8", newline="\n")
     queue_script = run_root / "run_600m_speaker_training_queue.py"
-    queue_script.write_text("# queue fixture\n", encoding="utf-8")
+    queue_script.write_text("# queue fixture\n", encoding="utf-8", newline="\n")
     log = run_root / "training.log"
     loss_steps = list(range(20, 250, 20))
     log.write_text(
         "".join(f"step={loss_step} loss=0.1\n" for loss_step in loss_steps)
         + "Training finished at step=250.\n",
         encoding="utf-8",
+        newline="\n",
     )
     evidence = run_root / "search-run-evidence.json"
     evidence.write_text(
@@ -350,6 +354,7 @@ def _write_run_evidence(  # noqa: PLR0914 - mirrors the real run-evidence artifa
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return evidence
 
@@ -363,10 +368,11 @@ def _rewrite_evidence_status(
     status.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
+        newline="\n",
     )
     payload["training_status"]["after_row_count"] = len(rows)
     payload["training_status"]["after_sha256"] = _sha(status)
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     return payload
 
 
@@ -383,15 +389,15 @@ def _rebind_evidence_config_sha(evidence: Path, config: Path) -> None:
         row["config_sha256"] = config_sha
     payload = _rewrite_evidence_status(evidence, rows)
     payload["run"]["config_sha256"] = config_sha
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
 
 def _rewrite_evidence_log(evidence: Path, text: str) -> dict[str, Any]:
     payload = cast("dict[str, Any]", json.loads(evidence.read_text(encoding="utf-8")))
     log = Path(payload["run"]["log"]["path"])
-    log.write_text(text, encoding="utf-8")
+    log.write_text(text, encoding="utf-8", newline="\n")
     payload["run"]["log"]["sha256"] = _sha(log)
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     return payload
 
 
@@ -432,7 +438,7 @@ def _rewrite_bound_search_training_config(
 ) -> None:
     config_payload = json.loads(config.read_text(encoding="utf-8"))
     config_payload["train"]["max_steps"] = max_steps
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
+    config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
     config_sha = _sha(config)
 
     manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -445,14 +451,15 @@ def _rewrite_bound_search_training_config(
     status.write_text(
         "".join(json.dumps(row) + "\n" for row in status_rows),
         encoding="utf-8",
+        newline="\n",
     )
     evidence_payload["training_status"]["after_sha256"] = _sha(status)
     evidence_payload["run"]["config_sha256"] = config_sha
-    evidence.write_text(json.dumps(evidence_payload), encoding="utf-8")
+    evidence.write_text(json.dumps(evidence_payload), encoding="utf-8", newline="\n")
 
     manifest_payload["checkpoint"]["training_config_sha256"] = config_sha
     manifest_payload["training_run_evidence"]["sha256"] = _sha(evidence)
-    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8", newline="\n")
 
 
 def test_builder_creates_dedicated_one_checkpoint_manifest(tmp_path: Path) -> None:
@@ -528,7 +535,7 @@ def test_builder_rejects_nonisolated_training_config(
     module, source, embedding, config = _build_fixture(tmp_path)
     config_payload = json.loads(config.read_text(encoding="utf-8"))
     config_payload["train"][field] = value
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
+    config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match=f"train.{field}.*250"):
         _build(module, source, embedding, config, tmp_path / "search-manifest.json")
@@ -542,7 +549,7 @@ def test_builder_requires_actual_search_log_interval(
     module, source, embedding, config = _build_fixture(tmp_path)
     config_payload = json.loads(config.read_text(encoding="utf-8"))
     config_payload["train"]["log_every"] = value
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
+    config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="train.log_every.*20"):
         _build(module, source, embedding, config, tmp_path / "search-manifest.json")
@@ -633,7 +640,7 @@ def test_builder_validates_source_checkpoint_payload_hash(tmp_path: Path) -> Non
     module, source, embedding, config = _build_fixture(tmp_path)
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["models"][0]["checkpoints"][0]["embedding_sha256"] = "f" * 64
-    source.write_text(json.dumps(payload), encoding="utf-8")
+    source.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="source checkpoint embedding SHA-256 mismatch"):
         _build(module, source, embedding, config, tmp_path / "search-manifest.json")
@@ -812,7 +819,7 @@ def test_builder_rejects_run_evidence_binding_drift(  # noqa: C901, PLR0912
         jobs = Path(payload["training_jobs"]["path"])
         jobs_payload = json.loads(jobs.read_text(encoding="utf-8"))
         jobs_payload["jobs"][0]["config"] = str(tmp_path / "wrong-config.json")
-        jobs.write_text(json.dumps(jobs_payload), encoding="utf-8")
+        jobs.write_text(json.dumps(jobs_payload), encoding="utf-8", newline="\n")
         payload["training_jobs"]["sha256"] = _sha(jobs)
     elif mutation == "status":
         rows = _evidence_status_rows(evidence)
@@ -831,7 +838,7 @@ def test_builder_rejects_run_evidence_binding_drift(  # noqa: C901, PLR0912
             jobs_payload["jobs"][1]["model_id"] = MODEL_ID
         else:
             jobs_payload["jobs"].pop()
-        jobs.write_text(json.dumps(jobs_payload), encoding="utf-8")
+        jobs.write_text(json.dumps(jobs_payload), encoding="utf-8", newline="\n")
         payload["training_jobs"]["sha256"] = _sha(jobs)
     elif mutation == "status_prefix":
         rows = _evidence_status_rows(evidence)
@@ -847,7 +854,7 @@ def test_builder_rejects_run_evidence_binding_drift(  # noqa: C901, PLR0912
         payload["run"]["candidate_checkpoint_count"] = 1
     else:
         payload["run"]["checkpoints"].pop()
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="evidence|job|status|checkpoint"):
         module.build_search_manifest(
@@ -903,14 +910,14 @@ def test_builder_rejects_target_job_command_and_config_path_drift(
         config_payload = json.loads(config.read_text(encoding="utf-8"))
         field = "manifest_path" if mutation == "config_manifest_drift" else "output_dir"
         config_payload["train"][field] = str(config.parent / f"alternate-{field}")
-        config.write_text(json.dumps(config_payload), encoding="utf-8")
+        config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
         _rebind_evidence_config_sha(evidence, config)
         payload = json.loads(evidence.read_text(encoding="utf-8"))
 
     if mutation.startswith("command_"):
-        jobs.write_text(json.dumps(jobs_payload), encoding="utf-8")
+        jobs.write_text(json.dumps(jobs_payload), encoding="utf-8", newline="\n")
         payload["training_jobs"]["sha256"] = _sha(jobs)
-        evidence.write_text(json.dumps(payload), encoding="utf-8")
+        evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="command|config|manifest|output"):
         module.build_search_manifest(
@@ -996,7 +1003,7 @@ def test_builder_rejects_search_training_log_drift(  # noqa: C901, PLR0912
         rows = _evidence_status_rows(evidence)
         rows[-1]["error"] = "training failed"
         payload = _rewrite_evidence_status(evidence, rows)
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="log|loss|step|OOM|Traceback|status"):
         module.build_search_manifest(
@@ -1025,7 +1032,7 @@ def test_generator_loads_only_search_schema_and_builds_exact_28_cases(tmp_path: 
     assert {case.checkpoint.checkpoint_step for case in module.build_search_cases(plan)} == {250}
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     payload["schema_version"] = "speaker-checkpoint-evaluation-manifest/v1"
-    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    manifest.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     with pytest.raises(TypeError, match="search-manifest"):
         module.load_search_plan(manifest)
 
@@ -1049,7 +1056,7 @@ def test_generator_revalidates_search_embedding_payload(tmp_path: Path) -> None:
     _write_embedding(embedding, dtype="F16")
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     payload["checkpoint"]["embedding_sha256"] = _sha(embedding)
-    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    manifest.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="F32"):
         module.load_search_plan(manifest)
@@ -1062,10 +1069,10 @@ def test_generator_revalidates_pinned_source_contract(tmp_path: Path) -> None:
     module = _load(GENERATOR, "speaker_search_generator_source_test")
     source_payload = json.loads(source.read_text(encoding="utf-8"))
     source_payload["schema_version"] = "wrong-source-schema"
-    source.write_text(json.dumps(source_payload), encoding="utf-8")
+    source.write_text(json.dumps(source_payload), encoding="utf-8", newline="\n")
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     payload["source_evaluation_manifest"]["sha256"] = _sha(source)
-    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    manifest.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="source manifest schema_version"):
         module.load_search_plan(manifest)
@@ -1082,7 +1089,7 @@ def test_generator_rejects_source_contract_drift(tmp_path: Path, field: str) -> 
         payload["checkpoint"]["base_revision"] = "drifted"
     else:
         payload["metrics_provenance"]["speaker_embedding"]["revision"] = "drifted"
-    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    manifest.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="source.*drift|does not match source"):
         module.load_search_plan(manifest)
@@ -1172,9 +1179,9 @@ def test_generator_emits_fully_bound_config_and_verification(tmp_path: Path) -> 
     base_path = tmp_path / "base-checkpoint.safetensors"
     generation_config = module.build_generation_config(plan=plan, checkpoint_path=base_path)
     config_path = tmp_path / "generation-config.json"
-    config_path.write_text(json.dumps(generation_config), encoding="utf-8")
+    config_path.write_text(json.dumps(generation_config), encoding="utf-8", newline="\n")
     results_path = tmp_path / "generation-results.jsonl"
-    results_path.write_text("{}\n", encoding="utf-8")
+    results_path.write_text("{}\n", encoding="utf-8", newline="\n")
     rows = module.bind_search_case_schema(
         [{"case_id": str(index), "status": "SUCCESS", "audio_finite": True} for index in range(28)]
     )
@@ -1393,7 +1400,7 @@ def test_evaluator_rejects_source_contract_drift(tmp_path: Path, field: str) -> 
         payload["checkpoint"]["base_checkpoint_sha256"] = "0" * 64
     else:
         payload["metrics_provenance"]["transcription"]["source_sha256"] = "0" * 64
-    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    manifest.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="source.*drift|does not match source"):
         module.load_search_manifest(manifest)
@@ -1419,7 +1426,7 @@ def _generation_evidence_fixture(
     evaluator = _load(EVALUATOR, "speaker_search_generation_evidence_test")
     manifest = evaluator.load_search_manifest(search_manifest)
     results = tmp_path / "generation-results.jsonl"
-    results.write_text("{}\n", encoding="utf-8")
+    results.write_text("{}\n", encoding="utf-8", newline="\n")
     base_path = tmp_path / "base-checkpoint.safetensors"
     config = tmp_path / "generation-config.json"
     config_payload = {
@@ -1444,7 +1451,7 @@ def _generation_evidence_fixture(
         "seeds": list(SEEDS),
         "styles": list(STYLES),
     }
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
+    config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
     verification = tmp_path / "generation-verification.json"
     verification.write_text(
         json.dumps(
@@ -1476,6 +1483,7 @@ def _generation_evidence_fixture(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return evaluator, verification, results, search_manifest, manifest
 
@@ -1513,9 +1521,9 @@ def test_evaluator_rejects_generation_config_contract_drift(
     config = Path(verification_payload["generation_config_path"])
     config_payload = json.loads(config.read_text(encoding="utf-8"))
     config_payload[field] = "drifted" if field != "case_count" else 27
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
+    config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
     verification_payload["generation_config_sha256"] = _sha(config)
-    verification.write_text(json.dumps(verification_payload), encoding="utf-8")
+    verification.write_text(json.dumps(verification_payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="generation config"):
         module._validate_generation_evidence(
@@ -1549,7 +1557,7 @@ def test_evaluator_rejects_generation_verification_contract_drift(
         payload[field] = {"SUCCESS": 27, "ERROR": 1}
     else:
         payload[field] = str(tmp_path / "wrong") if field.endswith("_path") else "0" * 64
-    verification.write_text(json.dumps(payload), encoding="utf-8")
+    verification.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="generation (config|verification)"):
         module._validate_generation_evidence(
@@ -1648,10 +1656,10 @@ def _stub_evaluator_cli_inputs(
         "metrics_results": tmp_path / "metrics-results.jsonl",
         "metrics_provenance": tmp_path / "metrics-provenance.json",
     }
-    paths["search_manifest"].write_text("{}\n", encoding="utf-8")
-    paths["generation_verification"].write_text("{}\n", encoding="utf-8")
+    paths["search_manifest"].write_text("{}\n", encoding="utf-8", newline="\n")
+    paths["generation_verification"].write_text("{}\n", encoding="utf-8", newline="\n")
     for name in ("generation_results", "analysis_results", "metrics_results"):
-        paths[name].write_text(json.dumps(identity) + "\n", encoding="utf-8")
+        paths[name].write_text(json.dumps(identity) + "\n", encoding="utf-8", newline="\n")
     paths["metrics_provenance"].write_text(
         json.dumps(
             {
@@ -1662,6 +1670,7 @@ def _stub_evaluator_cli_inputs(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
 
     manifest = SimpleNamespace(checkpoints={(MODEL_ID, 250): object()})
@@ -1718,7 +1727,9 @@ def test_evaluator_cli_rejects_jsonl_replaced_after_snapshot(
     def snapshot_and_replace(path: Path, *, source: str) -> tuple[bytes, str]:
         snapshot = cast("tuple[bytes, str]", original_snapshot(path, source=source))
         if source == source_to_replace:
-            path.write_text(json.dumps({"case_id": "replacement"}) + "\n", encoding="utf-8")
+            path.write_text(
+                json.dumps({"case_id": "replacement"}) + "\n", encoding="utf-8", newline="\n"
+            )
         return snapshot
 
     source_to_replace = source
@@ -1753,9 +1764,9 @@ def test_evaluator_parses_the_same_input_snapshot_it_hashes(
 ) -> None:
     module = _load(EVALUATOR, f"speaker_search_evaluator_{source}_snapshot_test")
     path = tmp_path / f"{source}.jsonl"
-    path.write_text(json.dumps({"case_id": "original"}) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({"case_id": "original"}) + "\n", encoding="utf-8", newline="\n")
     snapshot = module._snapshot_file(path, source=source)
-    path.write_text(json.dumps({"case_id": "replacement"}) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({"case_id": "replacement"}) + "\n", encoding="utf-8", newline="\n")
 
     rows = module._read_jsonl_snapshot(snapshot, path=path)
 
@@ -1783,7 +1794,7 @@ def test_evaluator_rejects_invalid_generation_verification(
 ) -> None:
     module = _load(EVALUATOR, f"speaker_search_generation_verification_{mutation}_test")
     results = tmp_path / "generation-results.jsonl"
-    results.write_text("{}\n", encoding="utf-8")
+    results.write_text("{}\n", encoding="utf-8", newline="\n")
     payload = {
         "schema_version": "speaker-checkpoint-search-generation-verification/v1",
         "passed": True,

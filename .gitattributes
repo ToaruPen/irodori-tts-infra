@@ -1,4 +1,3 @@
-# Keep formatter and shell inputs consistent on Windows checkouts.
-*.py text eol=lf
-*.sh text eol=lf
-justfile text eol=lf
+# Evidence scripts are pinned by SHA-256, and Ruff and shell inputs expect LF, so a Windows
+# checkout with core.autocrlf must not rewrite line endings.
+* text=auto eol=lf

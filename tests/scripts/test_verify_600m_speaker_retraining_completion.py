@@ -304,8 +304,8 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
     upstream = root / "upstream"
     package = upstream / "irodori_tts"
     package.mkdir(parents=True)
-    (package / "runtime.py").write_text("RUNTIME = True\n", encoding="utf-8")
-    (upstream / "README.md").write_text("fixture\n", encoding="utf-8")
+    (package / "runtime.py").write_text("RUNTIME = True\n", encoding="utf-8", newline="\n")
+    (upstream / "README.md").write_text("fixture\n", encoding="utf-8", newline="\n")
     _git(upstream, "init")
     _git(upstream, "config", "user.email", "test@example.invalid")
     _git(upstream, "config", "user.name", "Test")
@@ -333,7 +333,9 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
         config.parent.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True)
         log.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps({"source_id": model_id}) + "\n", encoding="utf-8")
+        manifest.write_text(
+            json.dumps({"source_id": model_id}) + "\n", encoding="utf-8", newline="\n"
+        )
         config.write_text(
             json.dumps(
                 {
@@ -357,6 +359,7 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
                 }
             ),
             encoding="utf-8",
+            newline="\n",
         )
         log.write_text(
             "\n".join(
@@ -365,6 +368,7 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
             )
             + "\n",
             encoding="utf-8",
+            newline="\n",
         )
         checkpoints = []
         for step in range(250, 3001, 250):
@@ -436,6 +440,7 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     prefix_rows = status_rows[:2]
     new_rows: list[dict[str, object]] = []
@@ -456,11 +461,12 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
     status_path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in status_rows),
         encoding="utf-8",
+        newline="\n",
     )
     launcher_script = root / "launch_600m_training_queue_speed_v1.py"
-    launcher_script.write_text("# immutable launcher\n", encoding="utf-8")
+    launcher_script.write_text("# immutable launcher\n", encoding="utf-8", newline="\n")
     queue_script = root / "run_600m_speaker_training_queue.py"
-    queue_script.write_text("# immutable queue\n", encoding="utf-8")
+    queue_script.write_text("# immutable queue\n", encoding="utf-8", newline="\n")
     launch_path = root / "launch-evidence.json"
     launch_path.write_text(
         json.dumps(
@@ -496,6 +502,7 @@ def _write_training_fixture(tmp_path: Path, module: ModuleType) -> TrainingFixtu
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return {
         "root": root,
@@ -529,7 +536,7 @@ def _write_evaluation_fixture(
         evaluation_dirs.append(evaluation_dir)
         reference = root / "references" / f"{model_id}.json"
         reference.parent.mkdir(parents=True, exist_ok=True)
-        reference.write_text("{}\n", encoding="utf-8")
+        reference.write_text("{}\n", encoding="utf-8", newline="\n")
         generation_dir = root / "generation" / model_id
         analysis_dir = root / "analysis" / model_id
         metrics_dir = root / "metrics" / model_id
@@ -564,7 +571,7 @@ def _write_evaluation_fixture(
             metrics_dir / "metrics-results.provenance.json",
         ):
             required.parent.mkdir(parents=True, exist_ok=True)
-            required.write_text("{}\n", encoding="utf-8")
+            required.write_text("{}\n", encoding="utf-8", newline="\n")
         checkpoints_by_name = {
             checkpoint.path.name: checkpoint for checkpoint in training_model.checkpoints
         }
@@ -597,6 +604,7 @@ def _write_evaluation_fixture(
                 }
             ),
             encoding="utf-8",
+            newline="\n",
         )
         results = [
             {
@@ -615,10 +623,14 @@ def _write_evaluation_fixture(
             for style in module.EXPECTED_STYLES
         ]
         (evaluation_dir / "evaluation-results.jsonl").write_text(
-            "".join(json.dumps(row) + "\n" for row in results), encoding="utf-8"
+            "".join(json.dumps(row) + "\n" for row in results), encoding="utf-8", newline="\n"
         )
-        (evaluation_dir / "checkpoint-summary.jsonl").write_text("{}\n", encoding="utf-8")
-        (evaluation_dir / "evaluation-config.json").write_text("{}\n", encoding="utf-8")
+        (evaluation_dir / "checkpoint-summary.jsonl").write_text(
+            "{}\n", encoding="utf-8", newline="\n"
+        )
+        (evaluation_dir / "evaluation-config.json").write_text(
+            "{}\n", encoding="utf-8", newline="\n"
+        )
         selected = checkpoint_rows[0] | {"rank": 1}
         selected_path = evaluation_dir / "selected-models.json"
         selected_path.write_text(
@@ -629,6 +641,7 @@ def _write_evaluation_fixture(
                 }
             ),
             encoding="utf-8",
+            newline="\n",
         )
         wav = root / "candidate-audio" / f"{model_id}.wav"
         wav.parent.mkdir(parents=True, exist_ok=True)
@@ -641,7 +654,7 @@ def _write_evaluation_fixture(
             "wav_sha256": module.sha256_file(wav),
         }
         (evaluation_dir / "review-candidates.jsonl").write_text(
-            json.dumps(candidate) + "\n", encoding="utf-8"
+            json.dumps(candidate) + "\n", encoding="utf-8", newline="\n"
         )
         packet = evaluation_dir / "review_packet"
         (packet / "audio").mkdir(parents=True)
@@ -665,6 +678,7 @@ def _write_evaluation_fixture(
                 }
             ),
             encoding="utf-8",
+            newline="\n",
         )
         artifacts = [
             evaluation_dir / "evaluation-results.jsonl",
@@ -691,8 +705,9 @@ def _write_evaluation_fixture(
                 }
             ),
             encoding="utf-8",
+            newline="\n",
         )
-    (manifest_root / "manifest-index.json").write_text("{}\n", encoding="utf-8")
+    (manifest_root / "manifest-index.json").write_text("{}\n", encoding="utf-8", newline="\n")
     config = root / "evaluation-config.json"
     config.write_text(
         json.dumps(
@@ -728,6 +743,7 @@ def _write_evaluation_fixture(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     component_names = (
         "run_600m_speaker_evaluation_queue.py",
@@ -740,7 +756,7 @@ def _write_evaluation_fixture(
     source_scripts = {name: root / "source-scripts" / name for name in component_names}
     for name, path in source_scripts.items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"# {name}\n", encoding="utf-8")
+        path.write_text(f"# {name}\n", encoding="utf-8", newline="\n")
     stages = ["manifests"] + [
         f"{model_id}:{stage}"
         for model_id in training.model_ids
@@ -791,6 +807,7 @@ def _write_evaluation_fixture(
     runtime_config.write_text(
         json.dumps(runtime_document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     upstream_root = Path(runtime_document["upstream_root"])
     upstream_python = sorted((upstream_root / "irodori_tts").rglob("*.py"))
@@ -817,6 +834,7 @@ def _write_evaluation_fixture(
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     upstream_archive = runtime_root / "upstream-runtime-package.zip"
     with zipfile.ZipFile(
@@ -868,6 +886,7 @@ def _write_evaluation_fixture(
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     runtime_config_sha = module.sha256_file(runtime_config)
     for row in status_rows:
@@ -893,9 +912,10 @@ def _write_evaluation_fixture(
     status.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in status_rows),
         encoding="utf-8",
+        newline="\n",
     )
     decisions = root / "review-decisions.jsonl"
-    decisions.write_text("", encoding="utf-8")
+    decisions.write_text("", encoding="utf-8", newline="\n")
     return {
         "root": root,
         "config": runtime_config,
@@ -928,6 +948,7 @@ def _refresh_evaluation_status_stage(
     fixture["status"].write_text(
         "".join(json.dumps(item, sort_keys=True) + "\n" for item in rows),
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -942,7 +963,7 @@ def _refresh_launch_status_hashes(
     current = module.sha256_file(fixture["status"])
     launch["status_after_sha256"] = current
     launch["status_row_count"] = len(lines)
-    fixture["launch"].write_text(json.dumps(launch), encoding="utf-8")
+    fixture["launch"].write_text(json.dumps(launch), encoding="utf-8", newline="\n")
 
 
 def _seed_existing_training_run(
@@ -953,7 +974,7 @@ def _seed_existing_training_run(
     model_id = seeded_status["model_id"]
     assert isinstance(model_id, str)
     run_provenance = Path(fixture["root"]) / "pilot-logs" / "anabel-run-provenance.json"
-    run_provenance.write_text(json.dumps({"model_id": model_id}), encoding="utf-8")
+    run_provenance.write_text(json.dumps({"model_id": model_id}), encoding="utf-8", newline="\n")
     run_provenance_sha256 = module.sha256_file(run_provenance)
     seeded_status["seeded_existing_run"] = {
         "run_provenance_path": str(run_provenance.resolve()),
@@ -962,6 +983,7 @@ def _seed_existing_training_run(
     fixture["status"].write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in fixture["status_rows"]),
         encoding="utf-8",
+        newline="\n",
     )
     _refresh_launch_status_hashes(fixture, module)
     return run_provenance, run_provenance_sha256
@@ -1003,7 +1025,7 @@ def _append_quality_run_evidence(
             "speaker_inversion_init_embedding": str(init_embedding),
         }
     )
-    config.write_text(json.dumps(config_payload), encoding="utf-8")
+    config.write_text(json.dumps(config_payload), encoding="utf-8", newline="\n")
     log = run_root / "training.log"
     log.write_text(
         "\n".join(
@@ -1012,6 +1034,7 @@ def _append_quality_run_evidence(
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     checkpoints = []
     for step in range(250, 3001, 250):
@@ -1050,7 +1073,7 @@ def _append_quality_run_evidence(
         }
     )
     jobs_path = run_root / f"training-jobs-{version}.json"
-    jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+    jobs_path.write_text(json.dumps(jobs), encoding="utf-8", newline="\n")
 
     predecessor_status = fixture["status"]
     before_bytes = predecessor_status.read_bytes()
@@ -1105,7 +1128,7 @@ def _append_quality_run_evidence(
     fixture["status"] = status_path
 
     diagnostic = run_root / "source-diagnostic.json"
-    diagnostic.write_text(json.dumps({"model_id": model_id}), encoding="utf-8")
+    diagnostic.write_text(json.dumps({"model_id": model_id}), encoding="utf-8", newline="\n")
     queue_script = fixture["root"] / "run_600m_speaker_training_queue.py"
     setup = run_root / "setup-evidence.json"
     setup.write_text(
@@ -1158,6 +1181,7 @@ def _append_quality_run_evidence(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     evidence = run_root / "run-evidence.json"
     evidence.write_text(
@@ -1225,6 +1249,7 @@ def _append_quality_run_evidence(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return evidence, jobs_path
 
@@ -1235,7 +1260,7 @@ def _refresh_quality_setup_binding(
     setup: dict[str, Any],
 ) -> None:
     setup_path = Path(payload["setup_evidence"]["path"])
-    setup_path.write_text(json.dumps(setup), encoding="utf-8")
+    setup_path.write_text(json.dumps(setup), encoding="utf-8", newline="\n")
     payload["setup_evidence"]["sha256"] = module.sha256_file(setup_path)
 
 
@@ -1251,7 +1276,7 @@ def _refresh_quality_config_provenance(
     config_path = Path(setup["paths"]["config"])
     config = json.loads(config_path.read_text(encoding="utf-8"))
     mutate(config)
-    config_path.write_text(json.dumps(config), encoding="utf-8")
+    config_path.write_text(json.dumps(config), encoding="utf-8", newline="\n")
     config_sha = module.sha256_file(config_path)
     setup["sha256"]["config"] = config_sha
     _refresh_quality_setup_binding(payload, module, setup)
@@ -1263,9 +1288,10 @@ def _refresh_quality_config_provenance(
     status_path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
+        newline="\n",
     )
     payload["training_status"]["after_sha256"] = module.sha256_file(status_path)
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
 
 def _refresh_quality_jobs_provenance(
@@ -1278,14 +1304,14 @@ def _refresh_quality_jobs_provenance(
     jobs_path = Path(payload["training_jobs"]["path"])
     jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
     mutate(jobs)
-    jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+    jobs_path.write_text(json.dumps(jobs), encoding="utf-8", newline="\n")
     jobs_sha = module.sha256_file(jobs_path)
     payload["training_jobs"]["sha256"] = jobs_sha
     setup_path = Path(payload["setup_evidence"]["path"])
     setup = json.loads(setup_path.read_text(encoding="utf-8"))
     setup["sha256"]["jobs"] = jobs_sha
     _refresh_quality_setup_binding(payload, module, setup)
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
 
 def _write_all_voice_decisions(path: Path, evaluations: EvaluationsLike) -> None:
@@ -1303,7 +1329,7 @@ def _write_all_voice_decisions(path: Path, evaluations: EvaluationsLike) -> None
         for model in evaluations.models
         for candidate in model.review_candidates
     ]
-    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8", newline="\n")
 
 
 def _write_staging_fixture(
@@ -1315,7 +1341,9 @@ def _write_staging_fixture(
     speakers = voice_bank_root / "speakers"
     speakers.mkdir(parents=True)
     manifest = voice_bank_root / "voice_bank_speakers.toml"
-    manifest.write_text('[narrator]\nref_embed = "speakers/current.speaker.safetensors"\n')
+    manifest.write_text(
+        '[narrator]\nref_embed = "speakers/current.speaker.safetensors"\n', newline="\n"
+    )
     speaker = speakers / "current.speaker.safetensors"
     speaker.write_bytes(b"active speaker")
     baseline = tmp_path / "voice-bank-baseline.json"
@@ -1341,6 +1369,7 @@ def _write_staging_fixture(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     current = {
         "root": str(voice_bank_root.resolve()),
@@ -1374,6 +1403,7 @@ def _write_staging_fixture(
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     return staging
 
@@ -1603,9 +1633,9 @@ def test_training_gate_rejects_quality_setup_without_queue_binding(tmp_path: Pat
     setup = json.loads(setup_path.read_text(encoding="utf-8"))
     setup["paths"].pop("queue_script")
     setup["sha256"].pop("queue_script")
-    setup_path.write_text(json.dumps(setup), encoding="utf-8")
+    setup_path.write_text(json.dumps(setup), encoding="utf-8", newline="\n")
     payload["setup_evidence"]["sha256"] = module.sha256_file(setup_path)
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="paths field set mismatch"):
         module.verify_training(
@@ -1638,7 +1668,7 @@ def test_training_gate_rejects_stale_base_predecessor_before_successor_overlay(
         config = fixture["root"] / "configs" / "Anabel.json"
         payload = json.loads(config.read_text(encoding="utf-8"))
         payload["train"]["stale_predecessor"] = True
-        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "manifest":
         manifest = fixture["root"] / "datasets" / "Anabel" / "clean.jsonl"
         with manifest.open("a", encoding="utf-8") as stream:
@@ -1770,7 +1800,7 @@ def test_training_gate_rejects_stale_serial_predecessor_before_next_overlay(
         config = Path(anabel["config"])
         payload = json.loads(config.read_text(encoding="utf-8"))
         payload["train"]["stale_between_runs"] = True
-        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     else:
         checkpoint = Path(anabel["output_dir"]) / "checkpoint_0002500.speaker.safetensors"
         _write_embedding(checkpoint, value=1.875)
@@ -1899,7 +1929,7 @@ def test_training_gate_rejects_tampered_quality_run_evidence(
     elif mutation == "row_order":
         lines = fixture["status"].read_text(encoding="utf-8").splitlines(keepends=True)
         lines[-2], lines[-1] = lines[-1], lines[-2]
-        fixture["status"].write_text("".join(lines), encoding="utf-8")
+        fixture["status"].write_text("".join(lines), encoding="utf-8", newline="\n")
         status_evidence["after_sha256"] = module.sha256_file(fixture["status"])
     elif mutation == "model_id":
         payload["model_id"] = "Kasumi"
@@ -1926,14 +1956,14 @@ def test_training_gate_rejects_tampered_quality_run_evidence(
             setup["paths"]["queue_script"] = str(substitute)
         else:
             setup["sha256"]["queue_script"] = "0" * 64
-        setup_path.write_text(json.dumps(setup), encoding="utf-8")
+        setup_path.write_text(json.dumps(setup), encoding="utf-8", newline="\n")
         payload["setup_evidence"]["sha256"] = module.sha256_file(setup_path)
     elif mutation == "queue_sha":
         payload["queue_script"]["sha256"] = "0" * 64
     else:
         with fixture["status"].open("a", encoding="utf-8") as status_file:
             status_file.write(json.dumps({"model_id": "undeclared"}) + "\n")
-    evidence.write_text(json.dumps(payload), encoding="utf-8")
+    evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises((TypeError, ValueError), match=match):
         module.verify_training(
@@ -2020,6 +2050,7 @@ def test_training_gate_rejects_invalid_versioned_status_lineage(
         cli_status.write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
             encoding="utf-8",
+            newline="\n",
         )
     elif mutation in {"outside_path", "same_path_alias"}:
         if mutation == "outside_path":
@@ -2032,7 +2063,7 @@ def test_training_gate_rejects_invalid_versioned_status_lineage(
         setup = json.loads(setup_path.read_text(encoding="utf-8"))
         setup["paths"]["status"] = str(replacement)
         _refresh_quality_setup_binding(payload, module, setup)
-        evidence.write_text(json.dumps(payload), encoding="utf-8")
+        evidence.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "missing_file":
         cli_status.unlink()
     else:
@@ -2134,16 +2165,16 @@ def test_training_gate_rejects_quality_successor_command_path_attacks(
         del command[value_index - 1 : value_index + 1]
     else:
         command.extend([flag, original_value])
-    jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+    jobs_path.write_text(json.dumps(jobs), encoding="utf-8", newline="\n")
     jobs_sha = module.sha256_file(jobs_path)
 
     setup_path = Path(evidence_payload["setup_evidence"]["path"])
     setup = json.loads(setup_path.read_text(encoding="utf-8"))
     setup["sha256"]["jobs"] = jobs_sha
-    setup_path.write_text(json.dumps(setup), encoding="utf-8")
+    setup_path.write_text(json.dumps(setup), encoding="utf-8", newline="\n")
     evidence_payload["training_jobs"]["sha256"] = jobs_sha
     evidence_payload["setup_evidence"]["sha256"] = module.sha256_file(setup_path)
-    evidence.write_text(json.dumps(evidence_payload), encoding="utf-8")
+    evidence.write_text(json.dumps(evidence_payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match=rf"command.*{flag}"):
         module.verify_training(
@@ -2268,26 +2299,28 @@ def test_seeded_training_run_rejects_invalid_run_provenance(
     elif failure == "sha256_mismatch":
         seeded_existing_run["run_provenance_sha256"] = "0" * 64
     elif failure == "invalid_json":
-        run_provenance.write_text("{", encoding="utf-8")
+        run_provenance.write_text("{", encoding="utf-8", newline="\n")
         seeded_existing_run["run_provenance_sha256"] = module.sha256_file(run_provenance)
     elif failure == "provenance_json":
-        run_provenance.write_text("[]", encoding="utf-8")
+        run_provenance.write_text("[]", encoding="utf-8", newline="\n")
         seeded_existing_run["run_provenance_sha256"] = module.sha256_file(run_provenance)
     elif failure == "missing_model_id":
-        run_provenance.write_text("{}", encoding="utf-8")
+        run_provenance.write_text("{}", encoding="utf-8", newline="\n")
         seeded_existing_run["run_provenance_sha256"] = module.sha256_file(run_provenance)
     elif failure == "empty_model_id":
-        run_provenance.write_text(json.dumps({"model_id": ""}), encoding="utf-8")
+        run_provenance.write_text(json.dumps({"model_id": ""}), encoding="utf-8", newline="\n")
         seeded_existing_run["run_provenance_sha256"] = module.sha256_file(run_provenance)
     else:
         run_provenance.write_text(
             json.dumps({"model_id": "different-model"}),
             encoding="utf-8",
+            newline="\n",
         )
         seeded_existing_run["run_provenance_sha256"] = module.sha256_file(run_provenance)
     fixture["status"].write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in fixture["status_rows"]),
         encoding="utf-8",
+        newline="\n",
     )
     _refresh_launch_status_hashes(fixture, module)
 
@@ -2345,18 +2378,19 @@ def test_training_gate_fails_closed(tmp_path: Path, mutation: str, match: str) -
         fixture["status"].write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
             encoding="utf-8",
+            newline="\n",
         )
         _refresh_launch_status_hashes(fixture, module)
     elif mutation == "bad_config":
         config = Path(fixture["root"]) / "configs" / "Anabel.json"
         payload = json.loads(config.read_text(encoding="utf-8"))
         payload["train"]["max_steps"] = 2999
-        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
         rows = fixture["status_rows"]
         assert isinstance(rows, list)
         rows[0]["config_sha256"] = module.sha256_file(config)
         Path(fixture["status"]).write_text(
-            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8", newline="\n"
         )
         _refresh_launch_status_hashes(fixture, module)
     elif mutation == "later_running":
@@ -2370,32 +2404,33 @@ def test_training_gate_fails_closed(tmp_path: Path, mutation: str, match: str) -
         path = Path(fixture["launch"])
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["queue_exit_code"] = 9
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "status_row_count":
         path = fixture["launch"]
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["status_row_count"] = 21
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "status_prefix":
         path = fixture["launch"]
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["status_before_sha256"] = "0" * 64
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "new_row_order":
         rows = fixture["status_rows"]
         rows[2], rows[4] = rows[4], rows[2]
         fixture["status"].write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
             encoding="utf-8",
+            newline="\n",
         )
         path = fixture["launch"]
         payload = json.loads(path.read_text(encoding="utf-8"))
         current_sha = module.sha256_file(fixture["status"])
         payload["status_after_sha256"] = current_sha
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "queue_script":
         (fixture["root"] / "run_600m_speaker_training_queue.py").write_text(
-            "# changed queue\n", encoding="utf-8"
+            "# changed queue\n", encoding="utf-8", newline="\n"
         )
     elif mutation == "residual_process":
         runtime = module.normalize_runtime_snapshot(
@@ -2724,7 +2759,7 @@ def test_case_matrix_and_snapshot_are_exact(tmp_path: Path) -> None:
     ]
     output = tmp_path / "output"
     output.mkdir()
-    (output / "artifact.txt").write_text("immutable\n", encoding="utf-8")
+    (output / "artifact.txt").write_text("immutable\n", encoding="utf-8", newline="\n")
 
     module.validate_case_matrix(rows, model_id="model-00")
     snapshot = module.snapshot_path(output)
@@ -2801,7 +2836,7 @@ def test_evaluation_gate_allows_untracked_upstream_files_outside_package(tmp_pat
     )
     fixture = _write_evaluation_fixture(tmp_path, module, training)
     (training_fixture["root"] / "upstream" / "scratch.txt").write_text(
-        "allowed\n", encoding="utf-8"
+        "allowed\n", encoding="utf-8", newline="\n"
     )
 
     result = module.verify_evaluations(fixture["config"], fixture["status"], training)
@@ -2826,7 +2861,7 @@ def test_evaluation_gate_rejects_current_dirty_upstream_package(
     fixture = _write_evaluation_fixture(tmp_path, module, training)
     package = training_fixture["root"] / "upstream" / "irodori_tts"
     target = package / ("runtime.py" if mutation == "tracked" else "new.py")
-    target.write_text("CHANGED = True\n", encoding="utf-8")
+    target.write_text("CHANGED = True\n", encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match="package is dirty or untracked"):
         module.verify_evaluations(fixture["config"], fixture["status"], training)
@@ -2854,6 +2889,7 @@ def test_generation_stage_fingerprint_binds_runtime_provenance(tmp_path: Path) -
     fixture["runtime_manifest"].write_text(
         json.dumps(snapshot_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     with pytest.raises(ValueError, match="producer command mismatch"):
@@ -2897,6 +2933,7 @@ def test_runtime_snapshot_rejects_tampered_upstream_package_archive(tmp_path: Pa
     fixture["runtime_manifest"].write_text(
         json.dumps(snapshot_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     with pytest.raises(ValueError, match="package archive hash mismatch"):
@@ -2936,7 +2973,7 @@ def test_evaluation_verification_requires_exact_matrix_metadata(
         verification.pop(field)
     else:
         verification[field] = expected + 1
-    verification_path.write_text(json.dumps(verification), encoding="utf-8")
+    verification_path.write_text(json.dumps(verification), encoding="utf-8", newline="\n")
     _refresh_evaluation_status_stage(fixture, module, model_id=training.model_ids[0])
 
     with pytest.raises(ValueError, match="evaluation verification did not pass"):
@@ -2988,7 +3025,7 @@ def test_runtime_evaluation_snapshot_fails_closed(
     elif mutation == "manifest_missing":
         del files["scripts/run_600m_speaker_evaluation_queue.py"]
     elif mutation == "snapshot_extra":
-        (manifest_path.parent / "unowned.txt").write_text("extra\n", encoding="utf-8")
+        (manifest_path.parent / "unowned.txt").write_text("extra\n", encoding="utf-8", newline="\n")
     elif mutation == "original_drift":
         training.training_status.write_bytes(training.training_status.read_bytes() + b"\n")
     elif mutation == "path_escape":
@@ -3000,6 +3037,7 @@ def test_runtime_evaluation_snapshot_fails_closed(
         runtime_config.write_text(
             json.dumps(runtime_document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+            newline="\n",
         )
         files["evaluation-queue-runtime.json"] = {
             "sha256": module.sha256_file(runtime_config),
@@ -3018,11 +3056,13 @@ def test_runtime_evaluation_snapshot_fails_closed(
         fixture["status"].write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
             encoding="utf-8",
+            newline="\n",
         )
     if mutation not in {"snapshot_extra", "original_drift"}:
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+            newline="\n",
         )
 
     with pytest.raises(ValueError, match=match):
@@ -3063,6 +3103,7 @@ def test_runtime_snapshot_rejects_paired_entries_outside_producer_inventory(
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     with pytest.raises(ValueError, match="producer file inventory"):
@@ -3121,7 +3162,7 @@ def test_evaluation_status_rejects_self_consistent_nonproducer_stage_contract(
     else:
         bogus = fixture["root"] / "bogus-generation"
         bogus.mkdir()
-        (bogus / "generation-results.jsonl").write_text("{}\n", encoding="utf-8")
+        (bogus / "generation-results.jsonl").write_text("{}\n", encoding="utf-8", newline="\n")
         row["outputs"] = [module.snapshot_path(bogus)]
         row["stage_fingerprint"] = module._current_stage_fingerprint(
             runtime_config,
@@ -3131,6 +3172,7 @@ def test_evaluation_status_rejects_self_consistent_nonproducer_stage_contract(
     fixture["status"].write_text(
         "".join(json.dumps(item, sort_keys=True) + "\n" for item in rows),
         encoding="utf-8",
+        newline="\n",
     )
 
     with pytest.raises(ValueError, match=r"producer (component|output|command)"):
@@ -3150,7 +3192,9 @@ def test_evaluation_rejects_reused_generation_with_two_proof_files(tmp_path: Pat
     fixture = _write_evaluation_fixture(tmp_path, module, training)
     runtime_config = json.loads(fixture["config"].read_text(encoding="utf-8"))
     reused_generation = Path(runtime_config["models"][0]["reuse"]["generation_dir"])
-    (reused_generation / "canonicalization-report.json").write_text("{}\n", encoding="utf-8")
+    (reused_generation / "canonicalization-report.json").write_text(
+        "{}\n", encoding="utf-8", newline="\n"
+    )
 
     with pytest.raises(ValueError, match="exactly one generation proof required"):
         module.verify_evaluations(fixture["config"], fixture["status"], training)
@@ -3183,27 +3227,31 @@ def test_evaluation_gate_fails_closed(tmp_path: Path, mutation: str, match: str)
     first = fixture["evaluation_dirs"][0]
     if mutation == "missing_stage":
         lines = status.read_text(encoding="utf-8").splitlines()
-        status.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+        status.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8", newline="\n")
     elif mutation == "stale_fingerprint":
         rows = [json.loads(line) for line in status.read_text(encoding="utf-8").splitlines()]
         rows[0]["stage_fingerprint"] = "0" * 64
-        status.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        status.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8", newline="\n"
+        )
     elif mutation == "changed_snapshot":
         rows = [json.loads(line) for line in status.read_text(encoding="utf-8").splitlines()]
         output = rows[0]["outputs"][0]
         output_root = Path(output["path"])
         relative = next(iter(output["files"]))
-        (output_root / relative).write_text("changed\n", encoding="utf-8")
+        (output_root / relative).write_text("changed\n", encoding="utf-8", newline="\n")
     elif mutation == "live_lock":
-        status.with_suffix(status.suffix + ".lock").write_text("locked\n", encoding="utf-8")
+        status.with_suffix(status.suffix + ".lock").write_text(
+            "locked\n", encoding="utf-8", newline="\n"
+        )
     elif mutation == "bad_matrix":
         results = first / "evaluation-results.jsonl"
         lines = results.read_text(encoding="utf-8").splitlines()
-        results.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+        results.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8", newline="\n")
         verification = first / "evaluation-verification.json"
         payload = json.loads(verification.read_text(encoding="utf-8"))
         payload["artifact_sha256"][str(results.resolve())] = module.sha256_file(results)
-        verification.write_text(json.dumps(payload), encoding="utf-8")
+        verification.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     elif mutation == "stale_embedding":
         training.models[0].checkpoints[3].path.write_bytes(b"changed")
     else:
@@ -3267,6 +3315,7 @@ def test_review_decisions_have_three_outcomes(tmp_path: Path) -> None:
             }
         ),
         encoding="utf-8",
+        newline="\n",
     )
     model = module.EvaluationModelSummary(
         model_id="model-00",
@@ -3285,7 +3334,7 @@ def test_review_decisions_have_three_outcomes(tmp_path: Path) -> None:
         evaluation_status_sha256="b" * 64,
     )
     decisions = tmp_path / "decisions.jsonl"
-    decisions.write_text("", encoding="utf-8")
+    decisions.write_text("", encoding="utf-8", newline="\n")
     assert module.verify_reviews(evaluations, decisions).status == "AWAITING_REVIEW"
 
     row = {
@@ -3298,7 +3347,7 @@ def test_review_decisions_have_three_outcomes(tmp_path: Path) -> None:
         "reviewed_at": "2026-08-02T00:00:00+00:00",
         "decision": "VOICE",
     }
-    decisions.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    decisions.write_text(json.dumps(row) + "\n", encoding="utf-8", newline="\n")
     assert module.verify_reviews(evaluations, decisions).status == "AWAITING_REVIEW"
 
     nonselected_row = {
@@ -3309,7 +3358,7 @@ def test_review_decisions_have_three_outcomes(tmp_path: Path) -> None:
         "decision": "TONE",
     }
     decisions.write_text(
-        json.dumps(row) + "\n" + json.dumps(nonselected_row) + "\n", encoding="utf-8"
+        json.dumps(row) + "\n" + json.dumps(nonselected_row) + "\n", encoding="utf-8", newline="\n"
     )
     reviewed = module.verify_reviews(evaluations, decisions)
     assert reviewed.status == "PASS"
@@ -3317,7 +3366,7 @@ def test_review_decisions_have_three_outcomes(tmp_path: Path) -> None:
 
     row["decision"] = "TONE"
     decisions.write_text(
-        json.dumps(row) + "\n" + json.dumps(nonselected_row) + "\n", encoding="utf-8"
+        json.dumps(row) + "\n" + json.dumps(nonselected_row) + "\n", encoding="utf-8", newline="\n"
     )
     with pytest.raises(ValueError, match="selected checkpoint"):
         module.verify_reviews(evaluations, decisions)
@@ -3365,7 +3414,9 @@ def test_review_gate_rejects_invalid_decisions_and_assets(
     else:
         asset = evaluations.models[0].evaluation_dir / "review_packet" / "audio" / "Anabel.wav"
         asset.write_bytes(b"changed")
-    decisions.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    decisions.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8", newline="\n"
+    )
 
     with pytest.raises(ValueError, match=match):
         module.verify_reviews(evaluations, decisions)
@@ -3541,10 +3592,10 @@ def test_cli_preflights_raw_proposed_staging_root_before_runtime_or_training(
         proposed = training_fixture["root"] / "dangling-proposed"
         proposed.symlink_to(training_fixture["root"] / "missing-proposed", target_is_directory=True)
         staging_payload["proposed_staging_root"] = str(proposed)
-    staging.write_text(json.dumps(staging_payload), encoding="utf-8")
+    staging.write_text(json.dumps(staging_payload), encoding="utf-8", newline="\n")
     launch = json.loads(training_fixture["launch"].read_text(encoding="utf-8"))
     launch["queue_exit_code"] = 9
-    training_fixture["launch"].write_text(json.dumps(launch), encoding="utf-8")
+    training_fixture["launch"].write_text(json.dumps(launch), encoding="utf-8", newline="\n")
     runtime_called = False
 
     def unexpected_runtime() -> object:
@@ -3630,12 +3681,12 @@ def test_cli_rechecks_staging_report_before_publishing_early_training_failure(
     output = training_fixture["root"] / "mutated-staging-completion.json"
     launch = json.loads(training_fixture["launch"].read_text(encoding="utf-8"))
     launch["queue_exit_code"] = 9
-    training_fixture["launch"].write_text(json.dumps(launch), encoding="utf-8")
+    training_fixture["launch"].write_text(json.dumps(launch), encoding="utf-8", newline="\n")
 
     def alias_proposed_root_to_output() -> object:
         staging_payload = json.loads(staging.read_text(encoding="utf-8"))
         staging_payload["proposed_staging_root"] = str(output)
-        staging.write_text(json.dumps(staging_payload), encoding="utf-8")
+        staging.write_text(json.dumps(staging_payload), encoding="utf-8", newline="\n")
         return module.RuntimeSnapshot.idle(used_mib=973.0)
 
     with pytest.raises(ValueError, match="staging report changed after preflight"):
@@ -3765,11 +3816,11 @@ def test_training_rejects_base_checkpoint_beneath_symlinked_ancestor(
     alias_root.symlink_to(training["root"], target_is_directory=True)
     jobs = json.loads(training["jobs"].read_text(encoding="utf-8"))
     jobs["base_checkpoint_path"] = str(alias_root / "base.safetensors")
-    training["jobs"].write_text(json.dumps(jobs), encoding="utf-8")
+    training["jobs"].write_text(json.dumps(jobs), encoding="utf-8", newline="\n")
     launch = json.loads(training["launch"].read_text(encoding="utf-8"))
     launch["training_jobs_sha256"] = module.sha256_file(training["jobs"])
     launch["checkpoint_path"] = jobs["base_checkpoint_path"]
-    training["launch"].write_text(json.dumps(launch), encoding="utf-8")
+    training["launch"].write_text(json.dumps(launch), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match=r"base_checkpoint_path.*symlink|alias|reparse"):
         module.verify_training(
@@ -3790,10 +3841,10 @@ def test_training_rejects_predecessor_config_beneath_symlinked_ancestor(
     alias_root.symlink_to(training["root"], target_is_directory=True)
     jobs = json.loads(training["jobs"].read_text(encoding="utf-8"))
     jobs["jobs"][0]["config"] = str(alias_root / "configs" / "Anabel.json")
-    training["jobs"].write_text(json.dumps(jobs), encoding="utf-8")
+    training["jobs"].write_text(json.dumps(jobs), encoding="utf-8", newline="\n")
     launch = json.loads(training["launch"].read_text(encoding="utf-8"))
     launch["training_jobs_sha256"] = module.sha256_file(training["jobs"])
-    training["launch"].write_text(json.dumps(launch), encoding="utf-8")
+    training["launch"].write_text(json.dumps(launch), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match=r"training job config.*symlink|alias|reparse"):
         module.verify_training(
@@ -3813,7 +3864,7 @@ def test_path_validation_rejects_windows_reparse_ancestor(
     ancestor = tmp_path / "junction"
     ancestor.mkdir()
     target = ancestor / "input.json"
-    target.write_text("{}\n", encoding="utf-8")
+    target.write_text("{}\n", encoding="utf-8", newline="\n")
     monkeypatch.setattr(
         module,
         "_is_reparse_alias",
@@ -3964,7 +4015,7 @@ def test_staging_gate_fails_closed(tmp_path: Path, mutation: str, match: str) ->
             tmp_path / "missing-proposed",
             target_is_directory=True,
         )
-    staging.write_text(json.dumps(payload), encoding="utf-8")
+    staging.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
 
     with pytest.raises(ValueError, match=match):
         module.verify_staging(evaluations, staging)
@@ -3999,7 +4050,7 @@ def test_report_writer_preserves_concurrent_temp_and_output(
     module = _load_script()
     blocked = tmp_path / "blocked.json"
     blocked_temp = blocked.with_suffix(".json.tmp")
-    blocked_temp.write_text("concurrent-temp", encoding="utf-8")
+    blocked_temp.write_text("concurrent-temp", encoding="utf-8", newline="\n")
     with pytest.raises(FileExistsError):
         module.write_report_create_only(blocked, {"status": "PASS"})
     assert blocked_temp.read_text(encoding="utf-8") == "concurrent-temp"
@@ -4008,7 +4059,7 @@ def test_report_writer_preserves_concurrent_temp_and_output(
     raced = tmp_path / "raced.json"
 
     def competing_link(_source: Path, destination: Path) -> None:
-        destination.write_text("concurrent-output", encoding="utf-8")
+        destination.write_text("concurrent-output", encoding="utf-8", newline="\n")
         raise FileExistsError(destination)
 
     monkeypatch.setattr(module.os, "link", competing_link)
