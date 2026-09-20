@@ -12,6 +12,7 @@ def _run(
     command: list[str],
     *,
     check: bool = True,
+    input_text: str | None = None,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     _LOGGER.info("deploy_remote_command", command=command)
@@ -22,6 +23,7 @@ def _run(
             check=check,
             encoding="utf-8",
             errors="replace",
+            input=input_text,
             text=True,
             timeout=timeout,
         )
@@ -33,6 +35,23 @@ def _run(
 def _powershell(script: str) -> str:
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     return f"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+
+
+_STDIN_BOOTSTRAP = (
+    "$payload = [Console]::In.ReadToEnd(); "
+    "$script = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)); "
+    "& ([scriptblock]::Create($script))"
+)
+
+
+def _powershell_stdin() -> str:
+    # Scripts longer than the Windows command-line limit travel on stdin. They go as
+    # base64 because PowerShell decodes raw stdin with the console code page, not UTF-8.
+    return _powershell(_STDIN_BOOTSTRAP)
+
+
+def _stdin_payload(script: str) -> str:
+    return base64.b64encode(script.encode("utf-8")).decode("ascii")
 
 
 def _ps_quote(value: str) -> str:

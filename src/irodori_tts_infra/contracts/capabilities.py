@@ -14,8 +14,15 @@ class _ContractModel(BaseModel):
 
 
 class DeliveryCaptionCapability(_ContractModel):
-    supported: Literal[False] = False  # noqa: V107 - serialized contract field.
-    max_chars: None = None
+    supported: bool = False  # noqa: V107 - serialized contract field.
+    max_chars: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _validate_limit(self) -> Self:
+        if self.supported != (self.max_chars is not None):
+            msg = "max_chars must be present exactly when delivery captions are supported"
+            raise ValueError(msg)
+        return self
 
 
 class EmojiCapability(_ContractModel):

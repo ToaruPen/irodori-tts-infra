@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
+import io
 import os
 import subprocess  # noqa: S404
 import sys
+import tempfile
+import wave
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import numpy as np
 import pytest
 
 from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
@@ -15,10 +19,10 @@ from irodori_tts_infra.engine.backends.fake import FakeSynthesizer
 from irodori_tts_infra.engine.backends.irodori import (
     INSTALL_HINT,
     IrodoriBaseBackend,
+    _encode_wav_bytes,  # noqa: PLC2701
     _runtime_factory,  # noqa: PLC2701
     _runtime_key_cls,  # noqa: PLC2701
     _sampling_request_cls,  # noqa: PLC2701
-    _save_wav_fn,  # noqa: PLC2701
     create_irodori_backend,
 )
 from irodori_tts_infra.engine.errors import BackendUnavailableError
@@ -29,6 +33,7 @@ from irodori_tts_infra.voice_bank import CharacterVoice, SpeakerEmbeddingProfile
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from irodori_tts_infra.engine.backends.irodori import (
         _InferenceRuntimeModule,
@@ -39,6 +44,9 @@ pytestmark = pytest.mark.unit
 
 FAKE_WAV_BYTES = b"RIFF\x08\x00\x00\x00WAVEfake"
 DEFAULT_SAMPLE_RATE = 24_000
+PCM_16_SAMPLE_WIDTH_BYTES = 2
+PCM_16_MAX = 32_767
+PCM_16_MIN = -32_768
 DEFAULT_NUM_STEPS = 40
 DEFAULT_CFG_SCALE_TEXT = 3.0
 DEFAULT_CFG_SCALE_CAPTION = 3.0
@@ -159,17 +167,32 @@ class RuntimeWithoutUnload:
 
 
 class TensorLikeAudio:
-    def __init__(self) -> None:
-        self.detach_count = 0
-        self.cpu_count = 0
+    def __init__(self, shape: tuple[int, ...]) -> None:
+        self.shape = shape
+        self.calls: list[object] = []
+        self.mono_samples = object()
 
     def detach(self) -> TensorLikeAudio:
-        self.detach_count += 1
+        self.calls.append("detach")
         return self
 
-    def cpu(self) -> TensorLikeAudio:
-        self.cpu_count += 1
+    def to(self, *, device: str, dtype: object) -> TensorLikeAudio:
+        self.calls.append(("to", device, dtype))
         return self
+
+    def squeeze(self, dim: int) -> TensorNumpyView:
+        self.calls.append(("squeeze", dim))
+        return TensorNumpyView(self.calls, self.mono_samples)
+
+
+class TensorNumpyView:
+    def __init__(self, calls: list[object], samples: object) -> None:
+        self._calls = calls
+        self._samples = samples
+
+    def numpy(self) -> object:
+        self._calls.append("numpy")
+        return self._samples
 
 
 class _FakeInferenceRuntime:
@@ -180,10 +203,6 @@ class _FakeInferenceRuntime:
         @staticmethod
         def from_key(_key: object) -> object:
             return object()
-
-    @staticmethod
-    def save_wav(_path: str, _audio: object, _sample_rate: int) -> None:
-        return None
 
 
 def fake_inference_runtime_module() -> _InferenceRuntimeModule:
@@ -233,20 +252,20 @@ def synthesis_request(**overrides: object) -> ResolvedSynthesisRequest:
     return ResolvedSynthesisRequest.model_validate(data)
 
 
-def fake_save_wav(path: str, _audio: object, _sample_rate: int) -> None:
-    Path(path).write_bytes(FAKE_WAV_BYTES)
+def fake_encode_wav(_audio: object, _sample_rate: int) -> bytes:
+    return FAKE_WAV_BYTES
 
 
 def make_backend(
     runtime: FakeRuntime | RuntimeWithoutUnload | UnloadFailingRuntime | None = None,
     *,
     settings: IrodoriRuntimeSettings | None = None,
-    save_wav_fn: Callable[[str, object, int], None] = fake_save_wav,
+    encode_wav_fn: Callable[[object, int], bytes] = fake_encode_wav,
 ) -> IrodoriBaseBackend:
     return IrodoriBaseBackend(
         runtime=runtime or FakeRuntime(),
         settings=settings or runtime_settings(),
-        save_wav_fn=save_wav_fn,
+        encode_wav_fn=encode_wav_fn,
         sampling_request_cls=FakeSamplingRequest,
     )
 
@@ -267,7 +286,7 @@ def test_backend_implements_synthesizer_protocol() -> None:
     synth: Synthesizer = IrodoriBaseBackend(
         runtime=FakeRuntime(),
         settings=runtime_settings(),
-        save_wav_fn=fake_save_wav,
+        encode_wav_fn=fake_encode_wav,
         sampling_request_cls=FakeSamplingRequest,
     )
 
@@ -317,7 +336,21 @@ def test_synthesize_neutral_style_omits_caption() -> None:
     assert runtime.calls[0].caption is None
 
 
-def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:
+def test_synthesize_forwards_freeform_delivery_caption_without_preset() -> None:
+    runtime = FakeRuntime()
+    backend = make_backend(runtime)
+
+    backend.synthesize(
+        synthesis_request(
+            style="neutral",
+            delivery_caption="雨の夜、耳元で囁くように話す。",
+        )
+    )
+
+    assert runtime.calls[0].caption == "雨の夜、耳元で囁くように話す。"
+
+
+def test_synthesize_produces_audio_with_fake_encoder_bytes() -> None:
     backend = make_backend(FakeRuntime(FakeRuntimeResult(sample_rate=48_000)))
 
     audio = backend.synthesize(synthesis_request())
@@ -325,39 +358,42 @@ def test_synthesize_produces_audio_with_fake_save_wav_bytes() -> None:
     assert audio == SynthesizedAudio(wav_bytes=FAKE_WAV_BYTES, sample_rate=48_000)
 
 
-def test_temp_wav_file_is_deleted_after_synthesize() -> None:
-    paths: list[Path] = []
+def test_synthesize_uses_in_memory_encoder() -> None:
+    runtime_audio = object()
+    encoder_calls: list[tuple[object, int]] = []
 
-    def save_wav(path: str, _audio: object, _sample_rate: int) -> None:
-        wav_path = Path(path)
-        paths.append(wav_path)
-        wav_path.write_bytes(FAKE_WAV_BYTES)
+    def encode_wav(audio: object, sample_rate: int) -> bytes:
+        encoder_calls.append((audio, sample_rate))
+        return FAKE_WAV_BYTES
 
-    backend = make_backend(save_wav_fn=save_wav)
+    backend = IrodoriBaseBackend(
+        runtime=FakeRuntime(
+            FakeRuntimeResult(audio=runtime_audio, sample_rate=48_000),
+        ),
+        settings=runtime_settings(),
+        encode_wav_fn=encode_wav,
+        sampling_request_cls=FakeSamplingRequest,
+    )
 
-    backend.synthesize(synthesis_request())
+    audio = backend.synthesize(synthesis_request())
 
-    assert paths
-    assert not paths[0].exists()
+    assert encoder_calls == [(runtime_audio, 48_000)]
+    assert audio == SynthesizedAudio(wav_bytes=FAKE_WAV_BYTES, sample_rate=48_000)
 
 
-def test_temp_wav_file_is_deleted_when_save_wav_raises() -> None:
-    paths: list[Path] = []
-
-    def save_wav(path: str, _audio: object, _sample_rate: int) -> None:
-        wav_path = Path(path)
-        paths.append(wav_path)
-        wav_path.write_bytes(b"partial")
+def test_encoder_failure_propagates_without_filesystem_artifacts(
+    tmp_path: Path,
+) -> None:
+    def encode_wav(_audio: object, _sample_rate: int) -> bytes:
         msg = "encoder failed"
         raise RuntimeError(msg)
 
-    backend = make_backend(save_wav_fn=save_wav)
+    backend = make_backend(encode_wav_fn=encode_wav)
 
     with pytest.raises(RuntimeError, match="encoder failed"):
         backend.synthesize(synthesis_request())
 
-    assert paths
-    assert not paths[0].exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_warm_up_requires_ref_embed() -> None:
@@ -474,7 +510,7 @@ def test_factory_uses_injected_download_and_runtime_factory(tmp_path: Path) -> N
         snapshot_download_fn=snapshot_download_fn,
         runtime_factory=runtime_factory,
         runtime_key_cls=FakeRuntimeKey,
-        save_wav_fn=fake_save_wav,
+        encode_wav_fn=fake_encode_wav,
         sampling_request_cls=FakeSamplingRequest,
     )
 
@@ -511,7 +547,7 @@ def test_factory_rejects_checkpoint_sha_mismatch_before_runtime_creation(tmp_pat
             snapshot_download_fn=lambda **_kwargs: str(tmp_path),
             runtime_factory=runtime_factory,
             runtime_key_cls=FakeRuntimeKey,
-            save_wav_fn=fake_save_wav,
+            encode_wav_fn=fake_encode_wav,
             sampling_request_cls=FakeSamplingRequest,
         )
 
@@ -557,7 +593,7 @@ def test_factory_rejects_invalid_bundled_tokenizer_before_runtime_creation(
             snapshot_download_fn=lambda **_kwargs: str(snapshot),
             runtime_factory=runtime_factory,
             runtime_key_cls=FakeRuntimeKey,
-            save_wav_fn=fake_save_wav,
+            encode_wav_fn=fake_encode_wav,
             sampling_request_cls=FakeSamplingRequest,
         )
 
@@ -575,12 +611,6 @@ def test_runtime_factory_falls_back_to_module_attr() -> None:
     resolved = _runtime_factory(None, module)
 
     assert resolved is module.InferenceRuntime.from_key
-
-
-def test_save_wav_fn_falls_back_to_module_attr() -> None:
-    module = fake_inference_runtime_module()
-
-    assert _save_wav_fn(None, module) is _FakeInferenceRuntime.save_wav
 
 
 def test_sampling_request_cls_falls_back_to_module_attr() -> None:
@@ -621,6 +651,7 @@ def test_install_hint_lists_packages_without_nonexistent_extra() -> None:
     assert "irodori-tts" in INSTALL_HINT
     assert "huggingface-hub" in INSTALL_HINT
     assert "torch" in INSTALL_HINT
+    assert "soundfile" in INSTALL_HINT
 
 
 def test_factory_wraps_snapshot_download_failure() -> None:
@@ -635,7 +666,7 @@ def test_factory_wraps_snapshot_download_failure() -> None:
             snapshot_download_fn=download_fn,
             runtime_factory=lambda _key: FakeRuntime(),
             runtime_key_cls=FakeRuntimeKey,
-            save_wav_fn=fake_save_wav,
+            encode_wav_fn=fake_encode_wav,
             sampling_request_cls=FakeSamplingRequest,
         )
 
@@ -658,7 +689,7 @@ def test_factory_wraps_runtime_factory_failure(tmp_path: Path) -> None:
             snapshot_download_fn=lambda **_kwargs: str(tmp_path),
             runtime_factory=runtime_factory,
             runtime_key_cls=FakeRuntimeKey,
-            save_wav_fn=fake_save_wav,
+            encode_wav_fn=fake_encode_wav,
             sampling_request_cls=FakeSamplingRequest,
         )
 
@@ -681,11 +712,44 @@ def test_factory_does_not_wrap_runtime_factory_type_error(tmp_path: Path) -> Non
             snapshot_download_fn=lambda **_kwargs: str(tmp_path),
             runtime_factory=runtime_factory,
             runtime_key_cls=FakeRuntimeKey,
-            save_wav_fn=fake_save_wav,
+            encode_wav_fn=fake_encode_wav,
             sampling_request_cls=FakeSamplingRequest,
         )
 
     assert exc_info.value is error
+
+
+@pytest.mark.parametrize("missing_module", ["torch", "soundfile"])
+def test_factory_rejects_missing_default_encoder_dependency_before_loading_model(
+    missing_module: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ModuleNotFoundError(f"No module named {missing_module!r}")
+
+    def import_module(name: str) -> object:
+        if name == missing_module:
+            raise error
+        return object()
+
+    def download_fn(**_kwargs: object) -> str:
+        pytest.fail("the model must not be downloaded when the encoder cannot work")
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.engine.backends.irodori.importlib.import_module",
+        import_module,
+    )
+
+    with pytest.raises(BackendUnavailableError) as exc_info:
+        create_irodori_backend(
+            runtime_settings(),
+            snapshot_download_fn=download_fn,
+            runtime_factory=lambda _key: FakeRuntime(),
+            runtime_key_cls=FakeRuntimeKey,
+            sampling_request_cls=FakeSamplingRequest,
+        )
+
+    assert str(exc_info.value) == INSTALL_HINT
+    assert exc_info.value.__cause__ is error
 
 
 def test_factory_does_not_wrap_injected_download_import_error() -> None:
@@ -700,7 +764,7 @@ def test_factory_does_not_wrap_injected_download_import_error() -> None:
             snapshot_download_fn=download_fn,
             runtime_factory=lambda _key: FakeRuntime(),
             runtime_key_cls=FakeRuntimeKey,
-            save_wav_fn=fake_save_wav,
+            encode_wav_fn=fake_encode_wav,
             sampling_request_cls=FakeSamplingRequest,
         )
 
@@ -711,7 +775,7 @@ def test_importing_irodori_backend_is_lightweight() -> None:
     code = (
         "import sys\n"
         "import irodori_tts_infra.engine.backends.irodori\n"
-        "blocked = {'irodori_tts', 'huggingface_hub', 'torch'}\n"
+        "blocked = {'irodori_tts', 'huggingface_hub', 'torch', 'soundfile'}\n"
         "loaded = blocked & set(sys.modules)\n"
         "assert not loaded, f'heavy modules loaded: {loaded}'\n"
     )
@@ -791,7 +855,7 @@ def test_all_runtime_settings_reach_expected_consumer(
         snapshot_download_fn=download_fn,
         runtime_factory=runtime_factory,
         runtime_key_cls=FakeRuntimeKey,
-        save_wav_fn=fake_save_wav,
+        encode_wav_fn=fake_encode_wav,
         sampling_request_cls=FakeSamplingRequest,
     )
     backend.synthesize(
@@ -890,21 +954,181 @@ def test_multiple_backends_coexist_independently() -> None:
     assert [call.text for call in second_runtime.calls] == ["二つ目", "三つ目"]
 
 
-def test_tensor_like_audio_is_passed_to_save_wav_verbatim() -> None:
-    audio = TensorLikeAudio()
-    saved_audio: list[object] = []
+def test_default_encoder_writes_normalized_samples_to_wav_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    float32 = object()
+    audio = TensorLikeAudio((1, 3))
+    writes: list[tuple[object, object, int, str, str]] = []
 
-    def save_wav(path: str, captured_audio: object, _sample_rate: int) -> None:
-        saved_audio.append(captured_audio)
-        Path(path).write_bytes(FAKE_WAV_BYTES)
+    class FakeTorch:
+        float32: object
 
-    backend = make_backend(
-        FakeRuntime(FakeRuntimeResult(audio=audio)),
-        save_wav_fn=save_wav,
+    FakeTorch.float32 = float32
+
+    class FakeSoundFile:
+        @staticmethod
+        def write(
+            file: object,
+            data: object,
+            samplerate: int,
+            *,
+            format: str,  # noqa: A002 - matches soundfile.write's keyword
+            subtype: str,
+        ) -> None:
+            assert isinstance(file, io.BytesIO)
+            writes.append((file, data, samplerate, format, subtype))
+            file.write(FAKE_WAV_BYTES)
+
+    def import_module(name: str) -> object:
+        return {"torch": FakeTorch, "soundfile": FakeSoundFile}[name]
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.engine.backends.irodori.importlib.import_module",
+        import_module,
     )
 
-    backend.synthesize(synthesis_request())
+    result = _encode_wav_bytes(audio, DEFAULT_SAMPLE_RATE)
 
-    assert saved_audio == [audio]
-    assert audio.detach_count == 0
-    assert audio.cpu_count == 0
+    samples = audio.mono_samples
+    assert result == FAKE_WAV_BYTES
+    assert writes == [(writes[0][0], samples, DEFAULT_SAMPLE_RATE, "WAV", "PCM_16")]
+    assert audio.calls == [
+        "detach",
+        ("to", "cpu", float32),
+        ("squeeze", 0),
+        "numpy",
+    ]
+
+
+def test_backend_default_encoder_returns_real_in_memory_wav(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel_first_samples = np.asarray(
+        [[-0.5, 0.0, 0.5]],
+        dtype=np.float32,
+    )
+    audio = TensorLikeAudio(channel_first_samples.shape)
+    audio.mono_samples = channel_first_samples[0]
+
+    class FakeTorch:
+        float32 = np.float32
+
+    real_import_module = importlib.import_module
+
+    def import_module(name: str) -> object:
+        if name == "torch":
+            return FakeTorch
+        return real_import_module(name)
+
+    def fail_named_temporary_file(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("synthesis must not create a temporary WAV file")
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.engine.backends.irodori.importlib.import_module",
+        import_module,
+    )
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", fail_named_temporary_file)
+    backend = IrodoriBaseBackend(
+        runtime=FakeRuntime(
+            FakeRuntimeResult(audio=audio, sample_rate=DEFAULT_SAMPLE_RATE),
+        ),
+        settings=runtime_settings(),
+        sampling_request_cls=FakeSamplingRequest,
+    )
+
+    result = backend.synthesize(synthesis_request())
+
+    assert result.wav_bytes[:4] == b"RIFF"
+    assert result.wav_bytes[8:12] == b"WAVE"
+    with wave.open(io.BytesIO(result.wav_bytes), "rb") as reader:
+        assert reader.getframerate() == DEFAULT_SAMPLE_RATE
+        assert reader.getnframes() == channel_first_samples.shape[1]
+        assert reader.getnchannels() == 1
+        assert reader.getsampwidth() == PCM_16_SAMPLE_WIDTH_BYTES
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_default_encoder_saturates_out_of_range_samples_instead_of_wrapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio = TensorLikeAudio((1, 4))
+    audio.mono_samples = np.asarray([1.02, 1.5, -1.02, -1.5], dtype=np.float32)
+
+    class FakeTorch:
+        float32 = np.float32
+
+    real_import_module = importlib.import_module
+
+    def import_module(name: str) -> object:
+        if name == "torch":
+            return FakeTorch
+        return real_import_module(name)
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.engine.backends.irodori.importlib.import_module",
+        import_module,
+    )
+
+    wav_bytes = _encode_wav_bytes(audio, DEFAULT_SAMPLE_RATE)
+
+    with wave.open(io.BytesIO(wav_bytes), "rb") as reader:
+        frames = np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2")
+    assert frames.tolist() == [PCM_16_MAX, PCM_16_MAX, PCM_16_MIN, PCM_16_MIN]
+
+
+@pytest.mark.parametrize("shape", [(3,), (1, 1, 3), (2, 24_000), (4, 24_000), (24_000, 1)])
+def test_default_encoder_rejects_audio_that_is_not_one_mono_candidate(
+    shape: tuple[int, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio = TensorLikeAudio(shape)
+
+    class FakeTorch:
+        float32 = object()
+
+    def import_module(name: str) -> object:
+        return {"torch": FakeTorch, "soundfile": object()}[name]
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.engine.backends.irodori.importlib.import_module",
+        import_module,
+    )
+
+    with pytest.raises(BackendUnavailableError, match=r"\(1, samples\)") as exc_info:
+        _encode_wav_bytes(audio, DEFAULT_SAMPLE_RATE)
+
+    assert str(shape) in str(exc_info.value)
+    assert "numpy" not in audio.calls
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ModuleNotFoundError("No module named 'soundfile'"),
+        OSError("sndfile library not found"),
+    ],
+)
+@pytest.mark.parametrize("missing_module", ["torch", "soundfile"])
+def test_default_encoder_reports_missing_dependency_as_backend_unavailable(
+    missing_module: str,
+    error: Exception,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    def import_module(name: str) -> object:
+        if name == missing_module:
+            raise error
+        return object()
+
+    monkeypatch.setattr(
+        "irodori_tts_infra.engine.backends.irodori.importlib.import_module",
+        import_module,
+    )
+
+    with pytest.raises(BackendUnavailableError) as exc_info:
+        _encode_wav_bytes(TensorLikeAudio((1, 3)), DEFAULT_SAMPLE_RATE)
+
+    assert str(exc_info.value) == INSTALL_HINT
+    assert exc_info.value.__cause__ is error

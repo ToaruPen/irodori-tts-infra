@@ -4,20 +4,16 @@ import os
 import shutil
 import subprocess  # noqa: S404
 import sys
-from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 
+from irodori_tts_infra import config
 from irodori_tts_infra.config import (
     ClientSettings,
     IrodoriRuntimeSettings,
-    PathSettings,
     ServerSettings,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 DEFAULT_PORT = 8924
 DEFAULT_NUM_STEPS = 40
@@ -38,7 +34,6 @@ def test_settings_defaults_match_current_runtime_contract() -> None:
     client = ClientSettings()
     server = ServerSettings()
     runtime = IrodoriRuntimeSettings()
-    paths = PathSettings()
 
     assert client.host == "127.0.0.1"
     assert client.port == DEFAULT_PORT
@@ -68,7 +63,6 @@ def test_settings_defaults_match_current_runtime_contract() -> None:
     assert runtime.warmup_style == "calm"
     assert runtime.public_generation == "unconfigured"
     assert runtime.emoji_conditioning_supported is True
-    assert paths.temp_wav_dir.name == "irodori-tts-wav"
 
 
 def test_runtime_settings_rejects_blank_checkpoint_env(
@@ -124,8 +118,7 @@ def test_runtime_settings_rejects_non_finite_sampling_values(field: str) -> None
         IrodoriRuntimeSettings.model_validate({field: float("inf")})
 
 
-def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    temp_wav_dir = tmp_path / "wav"
+def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IRODORI_TTS_CLIENT_HOST", "100.112.161.83")
     monkeypatch.setenv("IRODORI_TTS_CLIENT_PORT", str(OVERRIDE_PORT))
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_NUM_STEPS", str(OVERRIDE_NUM_STEPS))
@@ -139,7 +132,6 @@ def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_COMPILE_MODEL", "true")
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_PUBLIC_GENERATION", "fixture-generation")
     monkeypatch.setenv("IRODORI_TTS_RUNTIME_EMOJI_CONDITIONING_SUPPORTED", "false")
-    monkeypatch.setenv("IRODORI_TTS_PATH_TEMP_WAV_DIR", str(temp_wav_dir))
 
     assert ClientSettings().host == "100.112.161.83"
     assert ClientSettings().port == OVERRIDE_PORT
@@ -154,7 +146,6 @@ def test_settings_load_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert IrodoriRuntimeSettings().compile_model is True
     assert IrodoriRuntimeSettings().public_generation == "fixture-generation"
     assert IrodoriRuntimeSettings().emoji_conditioning_supported is False
-    assert PathSettings().temp_wav_dir == temp_wav_dir
 
 
 def test_valid_port_boundary_values_are_accepted() -> None:
@@ -183,13 +174,9 @@ def test_server_settings_rejects_non_loopback_hosts(host: str) -> None:
         ServerSettings(host=host)
 
 
-def test_blank_path_values_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(ValidationError, match="temp_wav_dir"):
-        PathSettings.model_validate({"temp_wav_dir": ""})
-
-    monkeypatch.setenv("IRODORI_TTS_PATH_TEMP_WAV_DIR", "   ")
-    with pytest.raises(ValidationError, match="temp_wav_dir"):
-        PathSettings()
+def test_config_does_not_expose_filesystem_wav_path_settings() -> None:
+    assert not hasattr(config, "PathSettings")
+    assert "PathSettings" not in config.__all__
 
 
 def test_config_import_does_not_import_heavy_layers() -> None:

@@ -41,6 +41,7 @@ class SynthesisJob:
     cfg_scale_caption: float = 3.0
     cfg_scale_speaker: float = 5.0
     style: IrodoriStyle = "neutral"
+    delivery_caption: str | None = None
     seed: int | None = None
     duration_scale: float = 1.0
     num_candidates: int = 1
@@ -63,6 +64,7 @@ class SynthesisJob:
             cfg_scale_caption=self.cfg_scale_caption,
             cfg_scale_speaker=self.cfg_scale_speaker,
             style=self.style,
+            delivery_caption=self.delivery_caption,
             seed=self.seed,
             duration_scale=self.duration_scale,
             num_candidates=self.num_candidates,

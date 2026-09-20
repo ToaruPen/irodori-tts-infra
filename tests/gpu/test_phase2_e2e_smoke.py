@@ -44,7 +44,7 @@ from irodori_tts_infra.voice_bank.repository import load_voice_profile
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from irodori_tts_infra.contracts.synthesis import SynthesisResult
+    from irodori_tts_infra.contracts.synthesis import IrodoriStyle, SynthesisResult
 
 pytestmark = [
     pytest.mark.gpu,
@@ -151,8 +151,17 @@ def test_phase2_chain_uses_speaker_embeddings_for_dialogue_and_narration(
     assert result.total_elapsed_seconds < MAX_SMOKE_SECONDS
 
 
+@pytest.mark.parametrize(
+    ("style", "delivery_caption"),
+    [
+        pytest.param("calm", None, id="preset"),
+        pytest.param("neutral", "聞き手を安心させるように、落ち着いて静かに話す。", id="freeform"),
+    ],
+)
 def test_voicedesign_combines_caption_and_speaker_embedding(
     phase2_smoke_setup: SmokeSetup,
+    style: IrodoriStyle,
+    delivery_caption: str | None,
 ) -> None:
     pipeline, _voice_profile, smoke_character_name = phase2_smoke_setup
     result = pipeline.synthesize_job(
@@ -161,7 +170,8 @@ def test_voicedesign_combines_caption_and_speaker_embedding(
             text="落ち着いて読み上げます。",
             speaker=smoke_character_name,
             require_speaker=True,
-            style="calm",
+            style=style,
+            delivery_caption=delivery_caption,
         ),
     )
 

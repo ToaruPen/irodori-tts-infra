@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import gettempdir
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, FiniteFloat, field_validator, model_validator
@@ -109,17 +107,3 @@ class IrodoriRuntimeSettings(BaseSettings):
             msg = "bundled tokenizer pins must be both set or both unset"
             raise ValueError(msg)
         return self
-
-
-class PathSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="IRODORI_TTS_PATH_", extra="forbid")
-
-    temp_wav_dir: Path = Field(default_factory=lambda: Path(gettempdir()) / "irodori-tts-wav")
-
-    @field_validator("temp_wav_dir", mode="before")
-    @classmethod
-    def _reject_blank_path(cls, value: object) -> object:
-        if isinstance(value, str) and not value.strip():
-            msg = "temp_wav_dir must not be blank"
-            raise ValueError(msg)
-        return value

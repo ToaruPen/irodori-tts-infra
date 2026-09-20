@@ -1,4 +1,4 @@
-# Irodori-TTS v4 VoiceDesign + Speaker Inversion Architecture
+# Irodori-TTS v4.1 VoiceDesign + Speaker Inversion Architecture
 
 > The filename is retained for historical links. RVC and the earlier v3 standard
 > paths are superseded; the current path retains server-side Speaker Inversion.
@@ -6,17 +6,18 @@
 ## Standard Pipeline
 
 ```text
-Text + speaker tag + fixed style
-  -> Irodori-TTS v4 VoiceDesign
+Text + speaker tag + (fixed style | delivery_caption)
+  -> Irodori-TTS v4.1 VoiceDesign
   + Speaker Inversion embedding (.speaker.safetensors)
   -> Multi-metric quality gate
   -> Playback / cache
 ```
 
-The default checkpoint is `Aratako/Irodori-TTS-v4-Small`. Each
+The default checkpoint is `Aratako/Irodori-TTS-v4.1-Small`. Each
 narrator or character voice is selected by a Speaker Inversion embedding.
-The fixed VoiceDesign caption controls delivery rather than identity, and there
-is no RVC conversion stage.
+The fixed preset caption or request-scoped `delivery_caption` controls delivery
+rather than identity, and there is no RVC conversion stage. These modes are
+mutually exclusive and the server never combines their captions.
 
 ## Voice Bank Manifest
 
@@ -46,6 +47,7 @@ Public HTTP requests carry portable speaker identity:
 - `num_steps`
 - `cfg_scale_text`
 - `style`
+- `delivery_caption` (optional, only with `style=neutral`)
 - `cfg_scale_caption`
 - `cfg_scale_speaker`
 - `seed`
@@ -59,8 +61,9 @@ the backend call. The backend boundary then receives the resolved `ref_embed`
 plus the same private sampling fields. Public HTTP clients must not send local
 `ref_embed` paths because client and GPU server filesystems may differ.
 
-Public clients must not send `caption` or `no_ref`. The server maps `style` to
-a fixed caption and sends it with `cfg_scale_caption` to the backend.
+Public clients must not send raw upstream `caption` or `no_ref`. The server maps
+`style` to a fixed caption, or forwards a validated `delivery_caption` unchanged,
+and sends exactly one of them with `cfg_scale_caption` to the backend.
 
 ## Superseded RVC Material
 

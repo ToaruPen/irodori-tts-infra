@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import os
-import tempfile
+import io
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from irodori_tts_infra.config.settings import PathSettings
 from irodori_tts_infra.contracts.synthesis import style_caption
 from irodori_tts_infra.engine.errors import BackendUnavailableError
 from irodori_tts_infra.engine.models import SynthesizedAudio
@@ -20,10 +17,12 @@ if TYPE_CHECKING:
 
 INSTALL_HINT = (
     "Irodori backend requires optional dependencies. Install: "
-    "pip install irodori-tts huggingface-hub torch"
+    "pip install irodori-tts huggingface-hub torch soundfile"
 )
 
-SaveWavFn = Callable[[str, object, int], object]
+_MONO_AUDIO_RANK = 2
+
+EncodeWavFn = Callable[[object, int], bytes]
 RequestFactory = Callable[..., object]
 RuntimeKeyFactory = Callable[..., object]
 RuntimeFactory = Callable[[object], "RuntimeLike"]
@@ -50,7 +49,70 @@ class _InferenceRuntimeModule(Protocol):
     RuntimeKey: RuntimeKeyFactory
     SamplingRequest: RequestFactory
     InferenceRuntime: _InferenceRuntimeType
-    save_wav: SaveWavFn
+
+
+class _TorchModule(Protocol):
+    float32: object
+
+
+class _SoundFileModule(Protocol):
+    def write(
+        self,
+        _file: object,
+        data: object,
+        samplerate: int,  # noqa: V107 - protocol parameter mirrors soundfile.write
+        *,
+        format: str,  # noqa: A002,V107 - protocol keyword mirrors soundfile.write
+        subtype: str,  # noqa: V107 - protocol keyword mirrors soundfile.write
+    ) -> object: ...
+
+
+class _TensorLike(Protocol):
+    @property
+    def shape(self) -> tuple[int, ...]: ...
+
+    def detach(self) -> _TensorLike: ...
+
+    def to(self, **_kwargs: object) -> _TensorLike: ...
+
+    def squeeze(self, _dim: int) -> _TensorLike: ...
+
+    def numpy(self) -> object: ...
+
+
+def _import_wav_encoder_modules() -> tuple[_TorchModule, _SoundFileModule]:
+    try:
+        torch = importlib.import_module("torch")
+        soundfile = importlib.import_module("soundfile")
+    except (ImportError, OSError) as exc:
+        # soundfile and torch raise OSError when their native libraries cannot be loaded.
+        raise BackendUnavailableError(INSTALL_HINT) from exc
+    return cast(_TorchModule, torch), cast(_SoundFileModule, soundfile)  # noqa: TC006
+
+
+def _encode_wav_bytes(audio: object, sample_rate: int) -> bytes:
+    torch, soundfile = _import_wav_encoder_modules()
+    tensor = (
+        cast(_TensorLike, audio)  # noqa: TC006
+        .detach()
+        .to(
+            device="cpu",
+            dtype=torch.float32,
+        )
+    )
+    # Upstream irodori_tts.inference_runtime returns SamplingResult.audio = trimmed_audios[0]: the
+    # first candidate only, for any num_candidates, decoded by a mono codec as (1, samples). Fail
+    # closed on anything else so a batched or samples-first tensor never becomes a multi-channel
+    # WAV.
+    if len(tensor.shape) != _MONO_AUDIO_RANK or tensor.shape[0] != 1:
+        msg = f"Irodori runtime audio must be shaped (1, samples), got {tensor.shape}"
+        raise BackendUnavailableError(msg)
+    samples = tensor.squeeze(0).numpy()
+
+    buffer = io.BytesIO()
+    # The censor-beep guard only accepts 16-bit PCM, so never rely on soundfile's default.
+    soundfile.write(buffer, samples, sample_rate, format="WAV", subtype="PCM_16")
+    return buffer.getvalue()
 
 
 @runtime_checkable
@@ -64,20 +126,14 @@ class IrodoriBaseBackend:
         runtime: RuntimeLike,
         settings: IrodoriRuntimeSettings,
         *,
-        save_wav_fn: SaveWavFn | None = None,
+        encode_wav_fn: EncodeWavFn = _encode_wav_bytes,
         sampling_request_cls: RequestFactory | None = None,
     ) -> None:
         self._runtime = runtime
         self._settings = settings
-        inference_runtime: _InferenceRuntimeModule | None = None
-        if save_wav_fn is None:
-            inference_runtime = _import_inference_runtime()
-            save_wav_fn = inference_runtime.save_wav
         if sampling_request_cls is None:
-            if inference_runtime is None:
-                inference_runtime = _import_inference_runtime()
-            sampling_request_cls = inference_runtime.SamplingRequest
-        self._save_wav_fn = save_wav_fn
+            sampling_request_cls = _import_inference_runtime().SamplingRequest
+        self._encode_wav_fn = encode_wav_fn
         self._sampling_request_cls = sampling_request_cls
         self._closed = False
 
@@ -86,7 +142,11 @@ class IrodoriBaseBackend:
 
         sampling_request = self._sampling_request_cls(
             text=request.text,
-            caption=style_caption(request.style),
+            caption=(
+                request.delivery_caption
+                if request.delivery_caption is not None
+                else style_caption(request.style)
+            ),
             ref_embed=request.ref_embed,
             num_steps=request.num_steps,
             cfg_scale_text=request.cfg_scale_text,
@@ -103,7 +163,7 @@ class IrodoriBaseBackend:
         )
         result = self._runtime.synthesize(sampling_request)
         sample_rate = int(result.sample_rate)
-        wav_bytes = self._save_result_to_wav_bytes(result.audio, sample_rate)
+        wav_bytes = self._encode_wav_fn(result.audio, sample_rate)
         return SynthesizedAudio(wav_bytes=wav_bytes, sample_rate=sample_rate)
 
     def warm_up(self, *, ref_embed: str | None = None) -> None:
@@ -145,23 +205,6 @@ class IrodoriBaseBackend:
             msg = "backend is closed"
             raise BackendUnavailableError(msg)
 
-    def _save_result_to_wav_bytes(self, audio: object, sample_rate: int) -> bytes:
-        temp_dir = PathSettings().temp_wav_dir
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_path: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=temp_dir,
-                suffix=".wav",
-                delete=False,
-            ) as temp_file:
-                temp_path = temp_file.name
-            self._save_wav_fn(temp_path, audio, sample_rate)
-            return Path(temp_path).read_bytes()
-        finally:
-            if temp_path is not None:
-                _unlink_temp_file(temp_path)
-
 
 def create_irodori_backend(
     settings: IrodoriRuntimeSettings,
@@ -170,19 +213,20 @@ def create_irodori_backend(
     snapshot_download_fn: HfSnapshotDownloadFn | None = None,
     runtime_factory: RuntimeFactory | None = None,
     runtime_key_cls: RuntimeKeyFactory | None = None,
-    save_wav_fn: SaveWavFn | None = None,
+    encode_wav_fn: EncodeWavFn = _encode_wav_bytes,
     sampling_request_cls: RequestFactory | None = None,
 ) -> IrodoriBaseBackend:
+    if encode_wav_fn is _encode_wav_bytes:
+        # Fail at startup rather than on the first synthesis request.
+        _import_wav_encoder_modules()
     snapshot_fn = snapshot_download_fn or _import_snapshot_download()
     inference_runtime = _import_inference_runtime_if_needed(
         runtime_factory=runtime_factory,
         runtime_key_cls=runtime_key_cls,
-        save_wav_fn=save_wav_fn,
         sampling_request_cls=sampling_request_cls,
     )
     resolved_runtime_key_cls = _runtime_key_cls(runtime_key_cls, inference_runtime)
     resolved_runtime_factory = _runtime_factory(runtime_factory, inference_runtime)
-    resolved_save_wav_fn = _save_wav_fn(save_wav_fn, inference_runtime)
     resolved_sampling_request_cls = _sampling_request_cls(
         sampling_request_cls,
         inference_runtime,
@@ -221,7 +265,7 @@ def create_irodori_backend(
     return IrodoriBaseBackend(
         runtime=runtime,
         settings=settings,
-        save_wav_fn=resolved_save_wav_fn,
+        encode_wav_fn=encode_wav_fn,
         sampling_request_cls=resolved_sampling_request_cls,
     )
 
@@ -266,13 +310,11 @@ def _import_inference_runtime_if_needed(
     *,
     runtime_factory: RuntimeFactory | None,
     runtime_key_cls: RuntimeKeyFactory | None,
-    save_wav_fn: SaveWavFn | None,
     sampling_request_cls: RequestFactory | None,
 ) -> _InferenceRuntimeModule | None:
     if (
         runtime_factory is not None
         and runtime_key_cls is not None
-        and save_wav_fn is not None
         and sampling_request_cls is not None
     ):
         return None
@@ -295,15 +337,6 @@ def _runtime_factory(
     if injected is not None:
         return injected
     return _require_inference_runtime(inference_runtime).InferenceRuntime.from_key
-
-
-def _save_wav_fn(
-    injected: SaveWavFn | None,
-    inference_runtime: _InferenceRuntimeModule | None,
-) -> SaveWavFn:
-    if injected is not None:
-        return injected
-    return _require_inference_runtime(inference_runtime).save_wav
 
 
 def _sampling_request_cls(
@@ -343,8 +376,3 @@ def _import_inference_runtime() -> _InferenceRuntimeModule:
         "_InferenceRuntimeModule",
         module,
     )
-
-
-def _unlink_temp_file(path: str) -> None:
-    with suppress(FileNotFoundError):
-        os.unlink(path)  # noqa: PTH108

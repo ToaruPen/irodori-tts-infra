@@ -6,8 +6,10 @@ from fastapi import Request  # noqa: TC002 - FastAPI resolves dependency annotat
 
 from irodori_tts_infra.contracts import (
     MAX_CHUNK_SIZE_BYTES,
+    MAX_DELIVERY_CAPTION_CHARS,
     CapabilitiesResponse,
     ConditioningCapabilities,
+    DeliveryCaptionCapability,
     EmojiCapability,
     HealthResponse,
     Readiness,
@@ -64,9 +66,13 @@ def get_capabilities_response(request: Request) -> CapabilitiesResponse:
         readiness=readiness,
         voices=voices,
         conditioning=ConditioningCapabilities(
+            delivery_caption=DeliveryCaptionCapability(
+                supported=True,
+                max_chars=MAX_DELIVERY_CAPTION_CHARS,
+            ),
             emoji=EmojiCapability(
                 supported=bool(getattr(request.app.state, "emoji_conditioning_supported", True))
-            )
+            ),
         ),
     )
 

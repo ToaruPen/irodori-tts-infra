@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from typing import Annotated, Literal, Self, TypeAlias
 
 from pydantic import (
@@ -27,7 +28,10 @@ class _ContractModel(BaseModel):
 MAX_NUM_CANDIDATES = 4
 DEFAULT_NUM_STEPS = 40
 MAX_NUM_STEPS = 64
-IrodoriStyle = Literal["neutral", "calm", "cheerful", "clear"]
+MAX_DELIVERY_CAPTION_CHARS = 300
+# Cc covers newline, tab, and NUL; Zl/Zp are the Unicode line and paragraph separators.
+_FORBIDDEN_CAPTION_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+IrodoriStyle = Literal["neutral", "calm", "cheerful", "clear", "alluring", "lewd"]
 StreamErrorCode: TypeAlias = Literal[
     "backend_unavailable",
     "backpressure",
@@ -41,6 +45,8 @@ _STYLE_CAPTIONS: dict[IrodoriStyle, str | None] = {
     "calm": "穏やかで優しい女性の声で、自然に話す。",
     "cheerful": "明るく親しみやすい女性の声で、自然に話す。",
     "clear": "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。",
+    "alluring": "落ち着いた大人の女性の、艶のある色っぽい声で、自然に話す。",
+    "lewd": "吐息を交えた大人の女性の、卑猥で挑発的な声で、艶っぽく話す。",
 }
 
 
@@ -58,6 +64,7 @@ class SynthesisRequest(_ContractModel):
     cfg_scale_caption: PositiveFiniteFloat = 3.0
     cfg_scale_speaker: PositiveFiniteFloat = 5.0
     style: IrodoriStyle = "neutral"
+    delivery_caption: str | None = None
     seed: int | None = None
     duration_scale: PositiveFiniteFloat = 1.0
     num_candidates: int = Field(default=1, gt=0, le=MAX_NUM_CANDIDATES)
@@ -83,6 +90,23 @@ class SynthesisRequest(_ContractModel):
             raise ValueError(msg)
         return stripped
 
+    @field_validator("delivery_caption")
+    @classmethod
+    def _normalize_delivery_caption(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            msg = "delivery_caption must not be blank"
+            raise ValueError(msg)
+        if len(stripped) > MAX_DELIVERY_CAPTION_CHARS:
+            msg = f"delivery_caption must be at most {MAX_DELIVERY_CAPTION_CHARS} characters"
+            raise ValueError(msg)
+        if any(unicodedata.category(char) in _FORBIDDEN_CAPTION_CATEGORIES for char in stripped):
+            msg = "delivery_caption must not contain control characters"
+            raise ValueError(msg)
+        return stripped
+
     @model_validator(mode="after")
     def _validate_voice_selection(self) -> Self:
         if (self.voice_id is None) != (self.if_generation is None):
@@ -90,6 +114,9 @@ class SynthesisRequest(_ContractModel):
             raise ValueError(msg)
         if self.speaker is not None and self.voice_id is not None:
             msg = "speaker and voice_id are mutually exclusive"
+            raise ValueError(msg)
+        if self.delivery_caption is not None and self.style != "neutral":
+            msg = "style and delivery_caption are mutually exclusive"
             raise ValueError(msg)
         return self
 

@@ -102,10 +102,16 @@ manifest is invalid. Public clients must not receive or send raw `ref_embed`
 paths, checkpoint or tokenizer identifiers, hashes, or other model-artifact
 metadata.
 
-The current public capability contract reports free-form delivery captions as
-unsupported. Style names such as `calm`, `cheerful`, and `clear` are
-server-owned convenience presets, not Irodori-TTS v4 recommendations or public
-voice-catalog fields.
+The public capability contract reports whether free-form delivery captions are
+supported and their maximum length. Style names such as `calm`, `cheerful`,
+`clear`, `alluring`, and `lewd` are server-owned convenience presets, not
+Irodori-TTS enums or public voice-catalog fields. A request may use either one
+non-neutral preset or one `delivery_caption`, never both. Delivery-caption
+support describes the API contract of the pinned v4.1 VoiceDesign runtime, so it
+is reported as supported regardless of model load state; use `readiness` to tell
+whether synthesis is currently available. The capability value changed without a
+`contract_version` bump, so clients built against the earlier unsupported shape
+must be rebuilt.
 
 The v4 base model occasionally renders explicit words as a machine censor beep
 (a steady tone near 710 Hz or 1 kHz), even with speaker embeddings trained on
@@ -123,14 +129,17 @@ requires separate approval and an explicit rollback target.
 The helpers under `/Users/sankenbisha/Dev/Test/tts` use the same standard API.
 `TTSEngine` opens an SSH local forward to Windows loopback port `8924`, waits
 for `status=ok` and `model_loaded=true`, and closes only the tunnel it created.
-Callers send a deployed `speaker` name and one fixed public `style`; model files
-and free-form captions remain server-side.
+Callers send a deployed `speaker` name and either one fixed public `style` or one
+validated `delivery_caption`; model files and raw upstream caption fields remain
+server-side.
 
 From macOS:
 
 ```bash
 cd /Users/sankenbisha/Dev/Test/tts
 python3 say.py カスミ "こんにちは" --style calm
+python3 say.py カスミ "こんばんは" --delivery-caption \
+  "雨の夜、親しい相手の耳元で囁くように、吐息を少し交えて話す。"
 python3 read_aloud.py ../chat/<setting>/<scenario>/turns/turn_XX.md
 ```
 
@@ -150,5 +159,8 @@ at an upstream v3 `remote_server.py` process.
 - Synthesis of one sentence returns `backend_unavailable` while others succeed:
   check the server log for `censor_beep_detected`. Four consecutive beeping
   attempts reject the segment instead of playing the beep.
-- Synthesis rejects `ref_embed` or a caption: this is expected. Use a deployed
-  `speaker` name and a fixed `style` with the standard infra server.
+- Synthesis rejects `ref_embed` or raw `caption`: this is expected. Use a
+  deployed `speaker` name with either a fixed `style` or `delivery_caption`.
+- Synthesis rejects `delivery_caption`: verify that it is 1–300 characters,
+  contains no control characters or Unicode line/paragraph separators, and is
+  not combined with a non-neutral style.

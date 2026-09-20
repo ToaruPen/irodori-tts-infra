@@ -3,17 +3,20 @@
 ## WHY — Project and Runtime Contract
 
 `irodori-tts-infra` is a Python 3.11+ infrastructure project for Japanese TTS
-using Irodori-TTS v4 Small VoiceDesign with Speaker Inversion voice identity.
+using Irodori-TTS v4.1 Small VoiceDesign with Speaker Inversion voice identity.
 
 The standard synthesis path is:
 
-1. Text and a fixed public style preset enter the Irodori-TTS v4 VoiceDesign model.
+1. Text and either a fixed public style preset or a request-scoped
+   `delivery_caption` enter the Irodori-TTS v4.1 VoiceDesign model.
 2. The server resolves the narrator or character to a Speaker Inversion embedding.
 3. A multi-metric quality gate produces an automated pass/fail result.
 4. Passing audio is available for playback or caching.
 
 The public `style` enum maps server-side to fixed VoiceDesign captions. Public
-arbitrary captions and RVC are not part of the standard path.
+`delivery_caption` accepts a free-form delivery instruction, but it is mutually
+exclusive with non-neutral presets. The raw upstream `caption` field and RVC are
+not part of the standard path.
 
 ## WHAT — Repository and Sources of Truth
 
@@ -125,6 +128,9 @@ service, GPU, network, or real Irodori runtime; explain the reason inline.
   upstream project, and virtual environment are intentionally pinned in `justfile`
   for historical training runs, not for provisioning a new PC. See
   `docs/deploy/windows.md` for local setup.
+- The deployment `.env` contains Windows paths. Do not load it with shell `source` or
+  `.` because shell evaluation consumes path backslashes. Let the project CLI load it,
+  or parse only the required keys without evaluating the file.
 - Remote recipes invoke the upstream Irodori-TTS project and virtual environment via
   `uv run --project ... --no-sync --python ...`. They neither resolve an arbitrary
   PowerShell `python` nor synchronize the pinned upstream training environment.

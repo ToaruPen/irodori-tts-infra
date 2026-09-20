@@ -130,8 +130,8 @@ C:\Users\user\irodori-tts-infra\.env
 ```
 
 The Windows `.env` should contain server/runtime settings such as
-`IRODORI_TTS_SERVER_HOST`, `IRODORI_TTS_SERVER_PORT`, `IRODORI_TTS_RUNTIME_*`, and
-`IRODORI_TTS_PATH_TEMP_WAV_DIR`. Do not commit this file.
+`IRODORI_TTS_SERVER_HOST`, `IRODORI_TTS_SERVER_PORT`, and `IRODORI_TTS_RUNTIME_*`.
+Do not commit this file.
 
 The standard runtime uses the pinned v4.1 Small VoiceDesign checkpoint (v4 Small with a
 retrained duration predictor; speaker embeddings must be trained on the same checkpoint):

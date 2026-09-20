@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette import status
 
-from irodori_tts_infra.contracts import CapabilitiesResponse
+from irodori_tts_infra.contracts import MAX_DELIVERY_CAPTION_CHARS, CapabilitiesResponse
 from irodori_tts_infra.engine.models import PipelineConfig
 from irodori_tts_infra.server.app import create_app
 
@@ -52,5 +52,6 @@ def test_capabilities_returns_runtime_catalog_without_fixed_names_or_order(
     )
     assert "ref_embed" not in response.text
     assert ".speaker.safetensors" not in response.text
-    assert capabilities.conditioning.delivery_caption.supported is False
+    assert capabilities.conditioning.delivery_caption.supported is True
+    assert capabilities.conditioning.delivery_caption.max_chars == MAX_DELIVERY_CAPTION_CHARS
     assert capabilities.conditioning.emoji.supported is True

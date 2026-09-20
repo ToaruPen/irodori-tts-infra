@@ -600,6 +600,19 @@ def test_synthesis_job_maps_to_contract_request() -> None:
     assert request.sway_coeff == pytest.approx(job.sway_coeff)
 
 
+def test_synthesis_job_maps_delivery_caption_to_contract_request() -> None:
+    job = SynthesisJob(
+        segment_index=0,
+        text="本文",
+        ref_embed="speakers/mika.speaker.safetensors",
+        delivery_caption="親しい相手へ静かに話す。",
+    )
+
+    request = job.to_request()
+
+    assert request.delivery_caption == "親しい相手へ静かに話す。"
+
+
 def test_synthesize_job_maps_backend_audio_to_contract_result() -> None:
     pipeline = make_pipeline(
         FakeSynthesizer(
