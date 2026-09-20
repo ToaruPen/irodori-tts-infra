@@ -5,10 +5,7 @@ import subprocess  # noqa: S404
 
 import pytest
 
-from irodori_tts_infra.deploy.remote._common import (  # noqa: PLC2701
-    _powershell_stdin,
-    _stdin_payload,
-)
+from irodori_tts_infra.deploy.remote._common import _ssh_powershell_stdin  # noqa: PLC2701
 
 pytestmark = [
     pytest.mark.integration,
@@ -20,13 +17,15 @@ pytestmark = [
 
 
 def run_stdin_script(script: str) -> subprocess.CompletedProcess[str]:
+    # Run the remote half locally: the last ssh argument is the PowerShell command line.
+    command, payload = _ssh_powershell_stdin("unused-host", script)
     return subprocess.run(  # noqa: S603
-        _powershell_stdin().split(" "),
+        command[-1].split(" "),
         capture_output=True,
         check=False,
         encoding="utf-8",
         errors="replace",
-        input=_stdin_payload(script),
+        input=payload,
         text=True,
     )
 

@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 VALIDATED_SAMPLE_RATES_HZ = (40_000, 50_000)
 WINDOW_SAMPLES = 1024
 HOP_SAMPLES = 96
-BLOCK_FRAMES = 4000
+# FFT batch size only: frames are independent, so this bounds memory without changing results.
+BLOCK_FRAMES = 256
 SEARCH_BAND_HZ = (150.0, 8000.0)
 MIN_FRAME_LINE_RATIO = 0.85
 MIN_FRAME_RMS_DBFS = -50.0
@@ -82,8 +83,10 @@ def find_censor_beeps(samples: ArrayLike, sample_rate: int) -> tuple[BeepRun, ..
         inside = index < dominated.size and bool(dominated[index])
         if inside and start is not None and steady[index]:
             continue
-        span = None if start is None else _beep_span(frequency[start:index], ratio[start:index])
-        if start is not None and span is not None:
+        if (
+            start is not None
+            and (span := _beep_span(frequency[start:index], ratio[start:index])) is not None
+        ):
             first, last = start + span[0], start + span[1]
             beeps.append(
                 BeepRun(

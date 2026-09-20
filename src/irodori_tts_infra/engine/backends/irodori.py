@@ -126,14 +126,14 @@ class IrodoriBaseBackend:
         runtime: RuntimeLike,
         settings: IrodoriRuntimeSettings,
         *,
-        encode_wav_fn: EncodeWavFn = _encode_wav_bytes,
+        encode_wav_fn: EncodeWavFn | None = None,
         sampling_request_cls: RequestFactory | None = None,
     ) -> None:
         self._runtime = runtime
         self._settings = settings
         if sampling_request_cls is None:
             sampling_request_cls = _import_inference_runtime().SamplingRequest
-        self._encode_wav_fn = encode_wav_fn
+        self._encode_wav_fn = encode_wav_fn or _encode_wav_bytes
         self._sampling_request_cls = sampling_request_cls
         self._closed = False
 
@@ -213,10 +213,10 @@ def create_irodori_backend(
     snapshot_download_fn: HfSnapshotDownloadFn | None = None,
     runtime_factory: RuntimeFactory | None = None,
     runtime_key_cls: RuntimeKeyFactory | None = None,
-    encode_wav_fn: EncodeWavFn = _encode_wav_bytes,
+    encode_wav_fn: EncodeWavFn | None = None,
     sampling_request_cls: RequestFactory | None = None,
 ) -> IrodoriBaseBackend:
-    if encode_wav_fn is _encode_wav_bytes:
+    if encode_wav_fn is None:
         # Fail at startup rather than on the first synthesis request.
         _import_wav_encoder_modules()
     snapshot_fn = snapshot_download_fn or _import_snapshot_download()

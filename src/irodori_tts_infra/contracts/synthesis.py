@@ -103,7 +103,7 @@ class SynthesisRequest(_ContractModel):
             msg = f"delivery_caption must be at most {MAX_DELIVERY_CAPTION_CHARS} characters"
             raise ValueError(msg)
         if any(unicodedata.category(char) in _FORBIDDEN_CAPTION_CATEGORIES for char in stripped):
-            msg = "delivery_caption must not contain control characters"
+            msg = "delivery_caption must not contain control characters or line separators"
             raise ValueError(msg)
         return stripped
 

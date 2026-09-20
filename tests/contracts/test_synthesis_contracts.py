@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from irodori_tts_infra.contracts import (
     DEFAULT_NUM_STEPS,
     MAX_CHUNK_SIZE_BYTES,
+    MAX_DELIVERY_CAPTION_CHARS,
     MAX_NUM_CANDIDATES,
     MAX_NUM_STEPS,
     MAX_SEGMENT_INDEX,
@@ -132,19 +133,12 @@ def test_synthesis_request_accepts_normalized_delivery_caption() -> None:
         "静かに\x00話す。",
         "静かに\u2028話す。",
         "静かに\u2029話す。",
+        pytest.param("あ" * (MAX_DELIVERY_CAPTION_CHARS + 1), id="overlong"),
     ],
 )
 def test_synthesis_request_rejects_invalid_delivery_caption(value: str) -> None:
     with pytest.raises(ValidationError, match="delivery_caption"):
         SynthesisRequest(text="こんにちは", delivery_caption=value)
-
-
-def test_synthesis_request_rejects_overlong_delivery_caption() -> None:
-    with pytest.raises(ValidationError, match="delivery_caption"):
-        SynthesisRequest(
-            text="こんにちは",
-            delivery_caption="あ" * 301,
-        )
 
 
 def test_synthesis_request_rejects_non_neutral_style_with_delivery_caption() -> None:

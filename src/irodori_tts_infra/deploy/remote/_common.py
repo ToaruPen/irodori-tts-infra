@@ -44,14 +44,15 @@ _STDIN_BOOTSTRAP = (
 )
 
 
-def _powershell_stdin() -> str:
-    # Scripts longer than the Windows command-line limit travel on stdin. They go as
-    # base64 because PowerShell decodes raw stdin with the console code page, not UTF-8.
-    return _powershell(_STDIN_BOOTSTRAP)
+def _ssh_powershell_stdin(host: str, script: str) -> tuple[list[str], str]:
+    """Return the ssh command and stdin payload that run `script` on the remote host.
 
-
-def _stdin_payload(script: str) -> str:
-    return base64.b64encode(script.encode("utf-8")).decode("ascii")
+    Scripts longer than the Windows command-line limit travel on stdin. They go as base64
+    because PowerShell decodes raw stdin with the console code page, not UTF-8, and ssh runs
+    with -T because a config-forced TTY would withhold the stdin EOF the bootstrap waits for.
+    """
+    payload = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    return ["ssh", "-T", host, _powershell(_STDIN_BOOTSTRAP)], payload
 
 
 def _ps_quote(value: str) -> str:

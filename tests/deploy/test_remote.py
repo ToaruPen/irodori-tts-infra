@@ -430,23 +430,12 @@ def test_start_service_uses_uvicorn_and_pid_file(
 def test_start_service_streams_script_instead_of_exceeding_windows_command_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[list[str], str | None]] = []
-
-    def capture_run(
-        command: Sequence[str],
-        *,
-        check: bool = True,
-        input_text: str | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        assert check is True
-        calls.append((list(command), input_text))
-        return subprocess.CompletedProcess(list(command), 0, "", "")
-
-    monkeypatch.setattr(service, "_run", capture_run)
+    commands = record_commands(monkeypatch, service)
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori", port=9001)
 
-    command, payload = calls[0]
+    command, check, payload = commands[0]
+    assert check is True
     assert payload is not None
     assert len(command) == len(["ssh", "-T", "gpu", "<bootstrap>"])
     assert len(command[3]) < WINDOWS_COMMAND_LINE_LIMIT_CHARS // 4

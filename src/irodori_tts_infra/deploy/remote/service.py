@@ -7,10 +7,9 @@ from irodori_tts_infra.config.settings import LOOPBACK_HOSTS, ServerSettings
 from irodori_tts_infra.deploy.remote._common import (
     _load_env_script,
     _powershell,
-    _powershell_stdin,
     _ps_quote,
     _run,
-    _stdin_payload,
+    _ssh_powershell_stdin,
 )
 from irodori_tts_infra.deploy.remote.sync import (
     resolve_remote_dir,
@@ -54,13 +53,11 @@ def start_service(
 ) -> None:
     host = resolve_remote_host(remote_host)
     directory = resolve_remote_dir(remote_dir)
-    _run(
-        # -T: a config-forced TTY would withhold the stdin EOF the bootstrap waits for.
-        ["ssh", "-T", host, _powershell_stdin()],
-        input_text=_stdin_payload(
-            _start_script(directory, server_host=server_host, port=port),
-        ),
+    command, payload = _ssh_powershell_stdin(
+        host,
+        _start_script(directory, server_host=server_host, port=port),
     )
+    _run(command, input_text=payload)
 
 
 def stop_service(
