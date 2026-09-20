@@ -5,6 +5,7 @@ from pathlib import Path
 
 from irodori_tts_infra.config.settings import IrodoriRuntimeSettings
 from irodori_tts_infra.engine.backends.irodori import create_irodori_backend
+from irodori_tts_infra.engine.beep_guard import BeepGuardedSynthesizer
 from irodori_tts_infra.engine.errors import VoiceBankInvalidError
 from irodori_tts_infra.engine.models import PipelineConfig
 from irodori_tts_infra.engine.pipeline import SynthesisPipeline
@@ -27,7 +28,7 @@ def _build_pipeline(settings: IrodoriRuntimeSettings) -> SynthesisPipeline:
     except (OSError, TypeError, ValueError) as exc:
         msg = "voice bank configuration is invalid"
         raise VoiceBankInvalidError(msg) from exc
-    backend = create_irodori_backend(settings)
+    backend = BeepGuardedSynthesizer(create_irodori_backend(settings))
     return SynthesisPipeline(
         backend,
         voice_profile,

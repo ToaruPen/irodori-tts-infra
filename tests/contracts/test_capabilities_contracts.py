@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from irodori_tts_infra.contracts import CapabilitiesResponse, Readiness, VoiceCapability
+from irodori_tts_infra.contracts import (
+    MAX_DELIVERY_CAPTION_CHARS,
+    CapabilitiesResponse,
+    DeliveryCaptionCapability,
+    Readiness,
+    VoiceCapability,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -95,6 +101,19 @@ def test_capabilities_reject_public_caption_limits_while_caption_is_unsupported(
                 },
             }
         )
+
+
+def test_delivery_caption_capability_requires_limit_when_supported() -> None:
+    capability = DeliveryCaptionCapability(
+        supported=True,
+        max_chars=MAX_DELIVERY_CAPTION_CHARS,
+    )
+
+    assert capability.supported is True
+    assert capability.max_chars == MAX_DELIVERY_CAPTION_CHARS
+
+    with pytest.raises(ValidationError, match="max_chars"):
+        DeliveryCaptionCapability(supported=True, max_chars=None)
 
 
 @pytest.mark.parametrize(

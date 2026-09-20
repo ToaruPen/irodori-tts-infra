@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import gettempdir
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, FiniteFloat, field_validator, model_validator
@@ -48,12 +46,12 @@ class IrodoriRuntimeSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="IRODORI_TTS_RUNTIME_", extra="forbid")
 
     checkpoint: str = Field(
-        default="Aratako/Irodori-TTS-v4-Small",
+        default="Aratako/Irodori-TTS-v4.1-Small",
         min_length=1,
     )
-    checkpoint_revision: CommitRevision = "e4aaac4df355ff560dcd35e0dae272c3a759317b"
+    checkpoint_revision: CommitRevision = "2b28324dc263ed5e6638b3cf3dd94c82ead07b4b"
     checkpoint_sha256: Sha256Hex = (
-        "5863c986345d9f6d20b7d8748fee1af02079c5161cf0c9e52557da0a0c378593"
+        "c85de88c01700cb53538e706f128ebcb1b8513ad21d7d0e75f58bc82cdbf89f6"
     )
     checkpoint_tokenizer_json_sha256: Sha256Hex | None = (
         "6a0734cf21c802169defaffe719bc2ef12bb9d0be37e54b61ed27aa89394723d"
@@ -109,17 +107,3 @@ class IrodoriRuntimeSettings(BaseSettings):
             msg = "bundled tokenizer pins must be both set or both unset"
             raise ValueError(msg)
         return self
-
-
-class PathSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="IRODORI_TTS_PATH_", extra="forbid")
-
-    temp_wav_dir: Path = Field(default_factory=lambda: Path(gettempdir()) / "irodori-tts-wav")
-
-    @field_validator("temp_wav_dir", mode="before")
-    @classmethod
-    def _reject_blank_path(cls, value: object) -> object:
-        if isinstance(value, str) and not value.strip():
-            msg = "temp_wav_dir must not be blank"
-            raise ValueError(msg)
-        return value

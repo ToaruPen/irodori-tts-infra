@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from irodori_tts_infra.contracts import (
     DEFAULT_NUM_STEPS,
     MAX_CHUNK_SIZE_BYTES,
+    MAX_DELIVERY_CAPTION_CHARS,
     MAX_NUM_CANDIDATES,
     MAX_NUM_STEPS,
     MAX_SEGMENT_INDEX,
@@ -101,6 +102,8 @@ def test_synthesis_request_rejects_non_finite_sampling_values(field: str) -> Non
         ("calm", "穏やかで優しい女性の声で、自然に話す。"),
         ("cheerful", "明るく親しみやすい女性の声で、自然に話す。"),
         ("clear", "子どもに伝わるように、ゆっくり明瞭な女性の声で話す。"),
+        ("alluring", "落ち着いた大人の女性の、艶のある色っぽい声で、自然に話す。"),
+        ("lewd", "吐息を交えた大人の女性の、卑猥で挑発的な声で、艶っぽく話す。"),
     ],
 )
 def test_style_caption_maps_public_style_to_fixed_caption(
@@ -108,6 +111,43 @@ def test_style_caption_maps_public_style_to_fixed_caption(
     expected: str | None,
 ) -> None:
     assert style_caption(style) == expected  # type: ignore[arg-type]
+
+
+def test_synthesis_request_accepts_normalized_delivery_caption() -> None:
+    request = SynthesisRequest(
+        text="こんにちは",
+        delivery_caption="  親しい相手へ静かに話す。  ",
+    )
+
+    assert request.delivery_caption == "親しい相手へ静かに話す。"
+    assert request.style == "neutral"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "   ",
+        "静かに\n話す。",
+        "静かに\t話す。",
+        "静かに\x00話す。",
+        "静かに\u2028話す。",
+        "静かに\u2029話す。",
+        pytest.param("あ" * (MAX_DELIVERY_CAPTION_CHARS + 1), id="overlong"),
+    ],
+)
+def test_synthesis_request_rejects_invalid_delivery_caption(value: str) -> None:
+    with pytest.raises(ValidationError, match="delivery_caption"):
+        SynthesisRequest(text="こんにちは", delivery_caption=value)
+
+
+def test_synthesis_request_rejects_non_neutral_style_with_delivery_caption() -> None:
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        SynthesisRequest(
+            text="こんにちは",
+            style="alluring",
+            delivery_caption="静かに話す。",
+        )
 
 
 def test_synthesis_request_normalizes_optional_identifiers() -> None:

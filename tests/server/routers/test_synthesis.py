@@ -276,6 +276,25 @@ def test_synthesize_accepts_style_and_caption_cfg(
     assert synthesizer.calls[0].cfg_scale_caption == pytest.approx(2.5)
 
 
+def test_synthesize_accepts_freeform_delivery_caption(
+    pipeline_factory: Callable[..., SynthesisPipeline],
+) -> None:
+    synthesizer = FakeSynthesizer()
+    app = create_app(pipeline_factory(synthesizer))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/synthesize",
+            json={
+                "text": "本文",
+                "delivery_caption": "親しい相手へ静かに話す。",
+            },
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert synthesizer.calls[0].delivery_caption == "親しい相手へ静かに話す。"
+
+
 def test_synthesize_returns_200_for_empty_wav_bytes(
     pipeline_factory: Callable[..., SynthesisPipeline],
 ) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 import typer
 from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
@@ -20,6 +21,12 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _hub_response(status: int) -> httpx.Response:
+    return httpx.Response(
+        status, request=httpx.Request("GET", "https://huggingface.co/datasets/test")
+    )
 
 
 def _plain_output(output: str) -> str:
@@ -164,7 +171,7 @@ def test_cli_reports_gated_repo_error_without_traceback(
 ) -> None:
     def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
         msg = "gated repo access is required"
-        raise GatedRepoError(msg)
+        raise GatedRepoError(msg, response=_hub_response(403))
 
     monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
 
@@ -189,7 +196,7 @@ def test_cli_reports_gated_repo_error_with_include_nsfw_without_traceback(
 ) -> None:
     def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
         msg = "gated repo access is required"
-        raise GatedRepoError(msg)
+        raise GatedRepoError(msg, response=_hub_response(403))
 
     monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
 
@@ -214,7 +221,7 @@ def test_cli_reports_hf_hub_http_error_without_traceback(
 ) -> None:
     def fake_extract_character_dataset(**_kwargs: object) -> ExtractionIndex:
         msg = "401 Client Error: Unauthorized for url"
-        raise HfHubHTTPError(msg)
+        raise HfHubHTTPError(msg, response=_hub_response(401))
 
     monkeypatch.setattr(extract, "extract_character_dataset", fake_extract_character_dataset)
 
@@ -245,13 +252,13 @@ def test_cli_reports_hf_hub_http_error_without_traceback(
             id="UnsupportedAudioFormatError",
         ),
         pytest.param(
-            GatedRepoError("gated repo access is required"),
+            GatedRepoError("gated repo access is required", response=_hub_response(403)),
             False,
             GatedRepoError,
             id="GatedRepoError",
         ),
         pytest.param(
-            HfHubHTTPError("401 Client Error: Unauthorized for url"),
+            HfHubHTTPError("401 Client Error: Unauthorized for url", response=_hub_response(401)),
             True,
             HfHubHTTPError,
             id="HfHubHTTPError",

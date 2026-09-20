@@ -12,6 +12,7 @@ from irodori_tts_infra.contracts.health import HealthResponse
 from irodori_tts_infra.contracts.synthesis import (
     DEFAULT_NUM_STEPS,
     MAX_CHUNK_SIZE_BYTES,
+    MAX_DELIVERY_CAPTION_CHARS,
     MAX_NUM_CANDIDATES,
     MAX_NUM_STEPS,
     MAX_SEGMENT_INDEX,
@@ -32,6 +33,7 @@ from irodori_tts_infra.contracts.voices import VoiceCapability, VoiceProfileResp
 __all__ = [
     "DEFAULT_NUM_STEPS",
     "MAX_CHUNK_SIZE_BYTES",
+    "MAX_DELIVERY_CAPTION_CHARS",
     "MAX_NUM_CANDIDATES",
     "MAX_NUM_STEPS",
     "MAX_SEGMENT_INDEX",

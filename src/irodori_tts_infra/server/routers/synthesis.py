@@ -180,6 +180,7 @@ def _job_from_request(request: SynthesisRequest, *, segment_index: int) -> Synth
         cfg_scale_caption=request.cfg_scale_caption,
         cfg_scale_speaker=request.cfg_scale_speaker,
         style=request.style,
+        delivery_caption=request.delivery_caption,
         seed=request.seed,
         duration_scale=request.duration_scale,
         num_candidates=request.num_candidates,

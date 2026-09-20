@@ -9,6 +9,7 @@ from irodori_tts_infra.deploy.remote._common import (
     _powershell,
     _ps_quote,
     _run,
+    _ssh_powershell_stdin,
 )
 from irodori_tts_infra.deploy.remote.sync import (
     resolve_remote_dir,
@@ -52,15 +53,11 @@ def start_service(
 ) -> None:
     host = resolve_remote_host(remote_host)
     directory = resolve_remote_dir(remote_dir)
-    _run(
-        [
-            "ssh",
-            host,
-            _powershell(
-                _start_script(directory, server_host=server_host, port=port),
-            ),
-        ],
+    command, payload = _ssh_powershell_stdin(
+        host,
+        _start_script(directory, server_host=server_host, port=port),
     )
+    _run(command, input_text=payload)
 
 
 def stop_service(

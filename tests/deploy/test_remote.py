@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 REMOTE_VALIDATION_FAILURE_CODE = 7
+WINDOWS_COMMAND_LINE_LIMIT_CHARS = 8191
+STDIN_BOOTSTRAP = (
+    "$payload = [Console]::In.ReadToEnd(); "
+    "$script = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)); "
+    "& ([scriptblock]::Create($script))"
+)
 
 
 def make_project(root: Path) -> None:
@@ -34,26 +40,44 @@ def make_project(root: Path) -> None:
 def record_commands(
     monkeypatch: pytest.MonkeyPatch,
     module: object,
-) -> list[tuple[list[str], bool]]:
-    commands: list[tuple[list[str], bool]] = []
+) -> list[tuple[list[str], bool, str | None]]:
+    commands: list[tuple[list[str], bool, str | None]] = []
 
-    def fake_run(command: Sequence[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-        commands.append((list(command), check))
+    def fake_run(
+        command: Sequence[str],
+        *,
+        check: bool = True,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append((list(command), check, input_text))
         return subprocess.CompletedProcess(list(command), 0, "", "")
 
     monkeypatch.setattr(module, "_run", fake_run)
     return commands
 
 
-def remote_command(command: list[str]) -> str:
-    assert command[:2] == ["ssh", "gpu"]
-    script = command[2]
+def remote_command(command: list[str], *, input_text: str | None = None) -> str:
+    if input_text is None:
+        assert command[:2] == ["ssh", "gpu"]
+        script = command[2]
+    else:
+        # -T keeps a config-forced TTY from withholding the stdin EOF the bootstrap waits for.
+        assert command[:3] == ["ssh", "-T", "gpu"]
+        script = command[3]
     marker = " -EncodedCommand "
     if marker not in script:
         return script
     encoded = script.rsplit(marker, maxsplit=1)[1]
     decoded = base64.b64decode(encoded).decode("utf-16le")
+    if input_text is not None:
+        assert decoded == STDIN_BOOTSTRAP
+        decoded = decode_stdin_payload(input_text)
     return f"powershell -NoProfile -ExecutionPolicy Bypass -Command {decoded}"
+
+
+def decode_stdin_payload(payload: str) -> str:
+    assert payload.isascii()
+    return base64.b64decode(payload, validate=True).decode("utf-8")
 
 
 def ps_string(value: str) -> str:
@@ -115,6 +139,7 @@ def test_sync_uses_rsync_with_expected_sources_and_excludes(
                 "gpu:C:/irodori/",
             ],
             True,
+            None,
         ),
     ]
 
@@ -144,6 +169,7 @@ def test_sync_falls_back_to_ssh_mkdir_and_scp_when_rsync_is_unavailable(
             "gpu:C:/irodori/",
         ],
         True,
+        None,
     )
 
 
@@ -383,7 +409,7 @@ def test_start_service_uses_uvicorn_and_pid_file(
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori", port=9001)
 
-    script = remote_command(commands[0][0])
+    script = remote_command(commands[0][0], input_text=commands[0][2])
     assert "Join-Path (Get-Location) '.uvicorn.pid'" in script
     assert "$line = $_.Trim([char]0xFEFF).Trim()" in script
     assert "$launcherPid = & $runtimePython -c" in script
@@ -401,6 +427,40 @@ def test_start_service_uses_uvicorn_and_pid_file(
     assert "Set-Content -LiteralPath $pidFile -Value $servicePid" in script
 
 
+def test_start_service_streams_script_instead_of_exceeding_windows_command_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = record_commands(monkeypatch, service)
+
+    service.start_service(remote_host="gpu", remote_dir="C:/irodori", port=9001)
+
+    command, check, payload = commands[0]
+    assert check is True
+    assert payload is not None
+    assert len(command) == len(["ssh", "-T", "gpu", "<bootstrap>"])
+    assert len(command[3]) < WINDOWS_COMMAND_LINE_LIMIT_CHARS // 4
+    script = remote_command(command, input_text=payload).split(" -Command ", maxsplit=1)[1]
+    assert script.startswith("Set-Location -LiteralPath 'C:/irodori'; ")
+    assert "$port = '9001';" in script
+    assert "$launcherPid = & $runtimePython -c" in script
+
+
+def test_start_service_sends_non_ascii_remote_dir_as_ascii_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = record_commands(monkeypatch, service)
+    remote_dir = "C:/Users/テスト/irodori"
+
+    service.start_service(remote_host="gpu", remote_dir=remote_dir, port=9001)
+
+    command, _check, payload = commands[0]
+    assert all(argument.isascii() for argument in command)
+    assert payload is not None
+    assert decode_stdin_payload(payload).startswith(
+        f"Set-Location -LiteralPath {ps_string(remote_dir)}; "
+    )
+
+
 def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -410,7 +470,7 @@ def test_start_service_uses_remote_env_host_and_port_when_not_overridden(
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori")
 
-    script = remote_command(commands[0][0])
+    script = remote_command(commands[0][0], input_text=commands[0][2])
     assert "$serverHost = if ($env:IRODORI_TTS_SERVER_HOST)" in script
     assert "$port = if ($env:IRODORI_TTS_SERVER_PORT)" in script
     assert f"{{ {ps_string(ServerSettings.model_fields['host'].default)} }}" in script
@@ -436,7 +496,7 @@ def test_start_service_rejects_non_loopback_remote_env_host(
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori")
 
-    script = remote_command(commands[0][0])
+    script = remote_command(commands[0][0], input_text=commands[0][2])
     assert "server host must be loopback" in script
 
 
@@ -447,7 +507,7 @@ def test_start_service_loads_remote_env_before_detached_launcher(
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori", port=9001)
 
-    script = remote_command(commands[0][0])
+    script = remote_command(commands[0][0], input_text=commands[0][2])
     assert "Join-Path (Get-Location) '.env'" in script
     assert "[Environment]::SetEnvironmentVariable($name, $value, 'Process')" in script
     assert script.index("[Environment]::SetEnvironmentVariable") < script.index(
@@ -531,7 +591,7 @@ def test_start_service_uses_non_reserved_variable_for_existing_service_pid(
 
     service.start_service(remote_host="gpu", remote_dir="C:/irodori")
 
-    script = remote_command(commands[0][0])
+    script = remote_command(commands[0][0], input_text=commands[0][2])
     assert "$servicePid = Get-Content -LiteralPath $pidFile" in script
     assert "Get-CimInstance Win32_Process" in script
     assert "irodori_tts_infra.server.main:app" in script
@@ -642,6 +702,28 @@ def test_shared_run_reraises_timeout_and_logs_command(
             {"command": ["ssh", "gpu"], "timeout": 1.25},
         ),
     ]
+
+
+def test_shared_run_forwards_standard_input_to_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def capture_run(
+        command: Sequence[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((list(command), kwargs))
+        return subprocess.CompletedProcess(list(command), 0, "", "")
+
+    monkeypatch.setattr("irodori_tts_infra.deploy.remote._common.subprocess.run", capture_run)
+
+    remote_common._run(  # noqa: SLF001
+        ["ssh", "gpu", "powershell -Command -"],
+        input_text="Write-Output 'stdin-ok'\n",
+    )
+
+    assert calls[0][1]["input"] == "Write-Output 'stdin-ok'\n"
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,7 @@ MANIFEST
 
 # Virtual environments
 .venv/
+.runtime-venv/
 venv/
 env/
 
@@ -35,6 +36,9 @@ logs/
 
 # Environment and secrets
 .env
+.uvicorn.pid
+.gitconfig-empty
+.runtime-compatibility-check.py
 .env.*
 !.env.example
 *.pem
@@ -76,6 +80,7 @@ recordings/
 data/raw/
 data/interim/
 data/processed/
+data/voice_banks/
 datasets/
 !src/irodori_tts_infra/datasets/
 !src/irodori_tts_infra/datasets/**/*.py

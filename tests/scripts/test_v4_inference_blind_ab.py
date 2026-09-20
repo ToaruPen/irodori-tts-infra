@@ -1353,6 +1353,7 @@ def test_build_request_sets_every_shared_and_condition_value_explicitly() -> Non
         "cfg_scale_caption": 3.0,
         "cfg_scale_speaker": 5.0,
         "style": "neutral",
+        "delivery_caption": None,
         "seed": 202,
         "duration_scale": 1.0,
         "num_candidates": 1,
